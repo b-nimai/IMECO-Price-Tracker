@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { formatAgo, freshness } from '@/data/format';
 import type { PriceData } from '@/data/types';
-import { HIGH_PRICE, LEGEND, LOW_PRICE, NO_DATA, OUT_OF_STOCK } from '@/lib/priceScale';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -21,44 +20,6 @@ interface Props {
   error: string | null;
   /** When the newest snapshot was TAKEN — not when the browser last fetched it. */
   checkedAt: number | null;
-}
-
-/** One swatch of the colour legend — the colour itself, next to what it means. */
-function Key({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="flex items-center gap-1.5">
-      <span
-        className="size-2.5 rounded-[2px] ring-1 ring-border"
-        style={{ backgroundColor: color }}
-        aria-hidden
-      />
-      {label}
-    </span>
-  );
-}
-
-/**
- * The colour key.
- *
- * It lives in the header rather than under the grid because the grid is the thing starved of
- * height — at 21px type every row of card spent on a legend is a product pushed below the fold,
- * and the header had an empty span across the middle doing nothing. Drawn as swatches rather
- * than described in words: with one fixed metric the legend no longer has to explain which of
- * three things green means, only which end of the ramp is which.
- */
-function Legend() {
-  return (
-    <div
-      className="hidden flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-muted-foreground xl:flex"
-      title={LEGEND}
-    >
-      <Key color={HIGH_PRICE} label="highest selling price" />
-      <Key color={LOW_PRICE} label="lowest" />
-      <Key color={OUT_OF_STOCK} label="out of stock" />
-      <Key color={NO_DATA} label="no data" />
-      <span className="text-muted-foreground/60">ranked within each product row</span>
-    </div>
-  );
 }
 
 /**
@@ -139,8 +100,6 @@ export function Header({
           </div>
         </div>
       </div>
-
-      <Legend />
 
       <div className="flex flex-wrap items-center gap-3">
         {totals && <Coverage totals={totals} />}

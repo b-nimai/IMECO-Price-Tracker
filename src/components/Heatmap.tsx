@@ -11,16 +11,24 @@ import {
 import { formatAmount, formatPrice } from '@/data/format';
 import { MARKETPLACES, MARKETPLACE_LABELS, type Cell, type Row } from '@/data/types';
 import { useGridFit } from '@/hooks/useGridFit';
-import {
-  INK,
-  NO_DATA,
-  NO_DATA_INK,
-  OUT_OF_STOCK,
-  fill,
-  position,
-  rowDomain,
-} from '@/lib/priceScale';
 import { cn } from '@/lib/utils';
+
+/**
+ * Every cell is the same black plate with white type — no heatmap, no status colour.
+ *
+ * The grid used to rank each row's prices on a yellow-to-green ramp and paint out-of-stock red.
+ * That was removed on request: this board is read as a price table, and the colour was carrying
+ * a second, competing argument across it.
+ *
+ * The hairline is what replaces it. With every cell the same colour there is nothing to
+ * separate one from the next, so the 1px inset border is the only thing keeping this legible as
+ * a grid rather than a wall of numbers.
+ */
+const PLATE: CSSProperties = {
+  backgroundColor: '#000000',
+  color: '#ffffff',
+  boxShadow: 'inset 0 0 0 1px var(--border)',
+};
 
 /**
  * The two pinned columns are sized from `--name-w` / `--mrp-w`, both computed below. Each is a
@@ -76,95 +84,54 @@ interface Props {
 /**
  * How a cell is drawn.
  *
- * Four outcomes, and the separation between them is the whole point: a ranked price (shaded
- * yellow→green by where it sits in its row), an out-of-stock price (red), a price with nothing
- * to rank it against (plain), and no price at all (black). A black cell asserts nothing — it
- * must never be mistakable for a cheap one, which is why blocked and unlisted land there too.
+ * With colour gone, the distinctions all live in the TEXT, and they still matter: a price you
+ * can buy, a price you cannot, a listing we hold no link for, and a page we could not read are
+ * four different things. `sub` carries the ones a number cannot say on its own.
  */
-function cellChrome(cell: Cell, domain: number[]) {
-  const blank = {
-    style: { backgroundColor: NO_DATA, color: NO_DATA_INK } as CSSProperties,
-    className: '',
-    text: '·',
-    sub: null as string | null,
-  };
+function cellChrome(cell: Cell) {
+  const base = { style: PLATE, className: '', sub: null as string | null };
 
-  // Spelled out rather than left as a dot. "No link available" is a job for whoever maintains
-  // the spreadsheet, and a bare `·` never once read as one. It goes in the SUB slot so it stays
-  // visually subordinate to the prices around it — it is a note, not a value.
-  if (cell.status === 'not_listed') return { ...blank, text: '', sub: 'No Link Available' };
+  switch (cell.status) {
+    case 'not_listed':
+      // Spelled out rather than left as a dot. "No link available" is a job for whoever
+      // maintains the spreadsheet, and a bare dot never once read as one. It sits in the SUB
+      // slot so it stays subordinate to the prices around it — a note, not a value.
+      return { ...base, className: 'text-muted-foreground', text: '', sub: 'No Link Available' };
 
-  if (cell.status === 'blocked') {
-    // Hatched over the black, so "we could not look" stays distinguishable from "there is
-    // nothing here to look at". Both are absences; only one is a problem.
-    return {
-      ...blank,
-      style: {
-        ...blank.style,
-        backgroundImage:
-          'repeating-linear-gradient(45deg, transparent, transparent 3px, var(--border) 3px, var(--border) 4px)',
-      } as CSSProperties,
-      text: '—',
-      sub: 'blocked',
-    };
+    case 'blocked':
+      // Hatched, so "we could not look" stays distinguishable from "there is nothing here to
+      // look at". Both are absences; only one is a problem.
+      return {
+        ...base,
+        style: {
+          ...PLATE,
+          backgroundImage:
+            'repeating-linear-gradient(45deg, transparent, transparent 3px, var(--border) 3px, var(--border) 4px)',
+        } as CSSProperties,
+        className: 'text-muted-foreground',
+        text: '—',
+        sub: 'blocked',
+      };
+
+    case 'error':
+      return { ...base, className: 'text-muted-foreground', text: '!', sub: 'error' };
+
+    case 'out_of_stock':
+      // Drawn exactly like a live price, by request. The price is still true — it is what the
+      // item costs when stock returns — and the grid is now read as a price table rather than
+      // an availability board. An em dash stands in where there is no price at all (an Amazon
+      // listing with no buybox). The tooltip still says OUT OF STOCK, which is the only place
+      // that fact survives on screen.
+      return { ...base, text: cell.price != null ? formatPrice(cell.price) : '—' };
+
+    default:
+      return cell.price != null
+        ? { ...base, text: formatPrice(cell.price) }
+        : { ...base, className: 'text-muted-foreground', text: '·' };
   }
-  if (cell.status === 'error') {
-    return {
-      ...blank,
-      style: { ...blank.style, boxShadow: 'inset 0 0 0 1px var(--destructive)' } as CSSProperties,
-      className: 'text-destructive',
-      text: '!',
-      sub: 'error',
-    };
-  }
-
-  const price = cell.price;
-
-  // Checked BEFORE the missing-price case below, because the two overlap: an Amazon listing
-  // with no buybox is out of stock AND has no number. Handled the other way round it fell
-  // through to a black dot, which — now that "no link" is spelled out in the same black — read
-  // as "we hold no link for this", when in fact we hold one and Amazon is simply not selling.
-  if (cell.status === 'out_of_stock') {
-    // Red, and outside the ranking entirely. The price is still true — it is what the item
-    // costs when stock returns — but it is not a price anyone can pay today, so letting it
-    // compete for "highest realised" would rank a sale that is not happening.
-    //
-    // No caption: red already carries the meaning on every cell that has it, and the words
-    // were crowding the price. The tooltip still spells it out. An em dash stands in where
-    // there is no price to show, so the cell is never an empty red box.
-    return {
-      style: { backgroundColor: OUT_OF_STOCK, color: INK } as CSSProperties,
-      className: '',
-      text: price != null ? formatPrice(price) : '—',
-      sub: null,
-    };
-  }
-
-  if (price == null) return blank;
-
-  const t = position(price, domain);
-
-  // Defensive only — an `ok` price is always a member of its own row's domain, so this is
-  // unreachable in practice. Kept so a future change to what builds the domain degrades to an
-  // honest unshaded price rather than to a colour it did not earn.
-  if (t === null) {
-    return {
-      style: { boxShadow: 'inset 0 0 0 1px var(--border)' } as CSSProperties,
-      className: 'text-foreground',
-      text: formatPrice(price),
-      sub: null,
-    };
-  }
-
-  return {
-    style: { backgroundColor: fill(t), color: INK } as CSSProperties,
-    className: '',
-    text: formatPrice(price),
-    sub: null,
-  };
 }
 
-function tooltip(cell: Cell, row: Row, domain: number[]): string {
+function tooltip(cell: Cell, row: Row): string {
   const label = MARKETPLACE_LABELS[cell.marketplace];
   const head = `${row.name} → ${label}`;
   switch (cell.status) {
@@ -178,14 +145,9 @@ function tooltip(cell: Cell, row: Row, domain: number[]): string {
       const parts = [`${head}: ${cell.price != null ? formatPrice(cell.price) : 'no price'} live`];
       const mrp = cell.mrp ?? row.mrp;
       if (mrp != null) parts.push(`MRP ${formatPrice(mrp)}`);
-      if (cell.status === 'out_of_stock') {
-        parts.push('OUT OF STOCK');
-      } else if (cell.price != null && domain.length > 1) {
-        const rank = domain.indexOf(cell.price);
-        if (rank === domain.length - 1) parts.push('highest live price for this product');
-        else if (rank === 0) parts.push('lowest live price for this product');
-        else parts.push(`rank ${domain.length - rank} of ${domain.length} by price`);
-      }
+      if (cell.status === 'out_of_stock') parts.push('OUT OF STOCK');
+      // The note is where a Blinkit price from another city announces itself.
+      if (cell.note) parts.push(cell.note);
       if (cell.unit) parts.push(cell.unit);
       return parts.join(' · ');
     }
@@ -294,13 +256,6 @@ export function Heatmap({ rows }: Props) {
 
         <TableBody>
           {rows.map((row) => {
-            // Rebuilt per row, and only from buyable listings — see priceScale.ts for why the
-            // ranking is per row rather than across the grid.
-            const domain = rowDomain(
-              MARKETPLACES.map((m) =>
-                row.cells[m].status === 'ok' ? row.cells[m].price : null,
-              ),
-            );
             return (
               <TableRow key={row.sku} className="hover:bg-transparent">
                 <TableCell
@@ -349,7 +304,7 @@ export function Heatmap({ rows }: Props) {
 
                 {MARKETPLACES.map((m) => {
                   const cell = row.cells[m];
-                  const chrome = cellChrome(cell, domain);
+                  const chrome = cellChrome(cell);
                   // Annotation sits INLINE with the price, not stacked. See gridFit.ts — a second
                   // line per row costs ~8 products off the bottom of a 1080 screen.
                   //
@@ -374,7 +329,7 @@ export function Heatmap({ rows }: Props) {
                         chrome.className,
                       )}
                       style={chrome.style}
-                      title={tooltip(cell, row, domain)}
+                      title={tooltip(cell, row)}
                     >
                       {/* A blocked cell keeps its link so someone can check it by hand — that is
                           the whole reason the URL is carried through to the browser. */}
