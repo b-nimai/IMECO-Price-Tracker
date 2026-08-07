@@ -1,0 +1,7 @@
+# Runtime
+httpx>=0.28          # HTTP client for both direct fetches and the Bright Data API
+openpyxl>=3.1        # reads Docs/pricing link.xlsx
+keyring>=25.0        # Windows Credential Manager — keeps the service_role key out of the .exe
+
+# Build only
+pyinstaller>=6.10
