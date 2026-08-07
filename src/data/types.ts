@@ -58,7 +58,6 @@ export interface PriceData {
     errored: number;
     blocked: number;
     outOfStock: number;
-    viaBrightData: number;
   };
 }
 
@@ -124,7 +123,7 @@ export function buildPriceData(
   }
 
   let checkedAt: number | null = null;
-  const totals = { live: 0, listed: 0, errored: 0, blocked: 0, outOfStock: 0, viaBrightData: 0 };
+  const totals = { live: 0, listed: 0, errored: 0, blocked: 0, outOfStock: 0 };
 
   const rows: Row[] = products.map((product) => {
     const targetSp = product.target_sp ?? {};
@@ -160,7 +159,6 @@ export function buildPriceData(
       if (snapshot.status === 'error') totals.errored += 1;
       if (snapshot.status === 'blocked') totals.blocked += 1;
       if (snapshot.status === 'out_of_stock') totals.outOfStock += 1;
-      if (snapshot.via === 'brightdata') totals.viaBrightData += 1;
     }
 
     // Only in-stock listings count toward "cheapest". An out-of-stock price cannot be bought,

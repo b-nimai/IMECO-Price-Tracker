@@ -10,7 +10,6 @@ from __future__ import annotations
 import sys
 
 from .adapters import PARSERS
-from .budget import Budget
 from .config import load_settings
 from .fetch import Fetcher
 
@@ -27,10 +26,9 @@ FIXTURES: list[tuple[str, str, str]] = [
 
 def run(targets: list[tuple[str, str, str]]) -> int:
     settings = load_settings()
-    budget = Budget()
     failures = 0
 
-    with Fetcher(settings, budget) as fetcher:
+    with Fetcher(settings) as fetcher:
         for marketplace, url, expectation in targets:
             result = fetcher.fetch_html(marketplace, url)
             if not result.ok:
@@ -54,8 +52,6 @@ def run(targets: list[tuple[str, str, str]]) -> int:
             if cell.status.value == "error":
                 failures += 1
 
-    budget.save()
-    print(f"\ncredits used: {fetcher.credits_used}   monthly: {budget.used}/{budget.ceiling}")
     return 1 if failures else 0
 
 

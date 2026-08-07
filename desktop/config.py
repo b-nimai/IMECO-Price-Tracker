@@ -23,8 +23,6 @@ ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".env"
 
 _FIELDS = (
-    "BRIGHTDATA_API_KEYS",
-    "BRIGHTDATA_ZONE",
     "SUPABASE_URL",
     "SUPABASE_SERVICE_KEY",
 )
@@ -57,28 +55,15 @@ def _from_keyring(name: str) -> str | None:
 
 @dataclass
 class Settings:
-    brightdata_keys: list[str]
-    brightdata_zone: str
     supabase_url: str
     supabase_service_key: str
-
-    @property
-    def can_unlock(self) -> bool:
-        """Whether the optional Bright Data fallback is available.
-
-        Expected to be False. All four marketplaces fetch directly; this only matters if one
-        of them starts refusing this IP."""
-        return bool(self.brightdata_keys and self.brightdata_zone)
 
     @property
     def can_store(self) -> bool:
         return bool(self.supabase_url and self.supabase_service_key)
 
     def missing(self) -> list[str]:
-        """Which REQUIRED settings still need a value — drives the first-run setup prompt.
-
-        Bright Data is deliberately not listed: it is an optional fallback, and prompting for
-        it would imply the app cannot run without it."""
+        """Which settings still need a value — drives the first-run setup prompt."""
         out = []
         if not self.supabase_url:
             out.append("SUPABASE_URL")
@@ -94,10 +79,7 @@ def load_settings() -> Settings:
         # Credential Manager wins; a real env var beats the .env file, for CI and one-offs.
         return (_from_keyring(name) or os.environ.get(name) or env.get(name) or "").strip()
 
-    raw_keys = get("BRIGHTDATA_API_KEYS")
     return Settings(
-        brightdata_keys=[k.strip() for k in raw_keys.split(",") if k.strip()],
-        brightdata_zone=get("BRIGHTDATA_ZONE"),
         supabase_url=get("SUPABASE_URL").rstrip("/"),
         supabase_service_key=get("SUPABASE_SERVICE_KEY"),
     )

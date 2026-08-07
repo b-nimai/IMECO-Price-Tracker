@@ -82,12 +82,11 @@ class Store:
         rows = self._post("runs", [{"source": source}])
         return rows[0]["id"]
 
-    def finish_run(self, run_id: str, cells: list[Cell], credits_used: int) -> None:
+    def finish_run(self, run_id: str, cells: list[Cell]) -> None:
         counts = {
             "ok_count": sum(c.status in (Status.OK, Status.OUT_OF_STOCK) for c in cells),
             "error_count": sum(c.status is Status.ERROR for c in cells),
             "blocked_count": sum(c.status is Status.BLOCKED for c in cells),
-            "credits_used": credits_used,
             "finished_at": "now()",
         }
         response = self._client.patch(

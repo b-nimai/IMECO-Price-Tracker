@@ -29,7 +29,7 @@ class Status(str, Enum):
     real information (it is what the price WILL be), so we keep it rather than blanking it."""
 
     BLOCKED = "blocked"
-    """Anti-bot defence won, or the credit budget was exhausted. We do not know the price."""
+    """Anti-bot defence won. We do not know the price, and there is no fallback to try."""
 
     ERROR = "error"
     """Fetched but could not parse, or the request failed. Almost always means the site changed
@@ -37,12 +37,14 @@ class Status(str, Enum):
 
 
 class Via(str, Enum):
-    """How the HTML was obtained. Recorded for cost accounting, not shown on the dashboard."""
+    """How the HTML was obtained. Not shown on the dashboard.
+
+    Only two values now that the paid unblocker is gone. The database still ALLOWS
+    'brightdata' in its CHECK constraint so historical rows stay valid — nothing writes it."""
 
     DIRECT = "direct"
-    BRIGHTDATA = "brightdata"
     NONE = "none"
-    """No request was made at all (NOT_LISTED, or refused by the budget guard)."""
+    """No request was made at all — the SKU has no link for this marketplace."""
 
 
 MARKETPLACES = ("amazon", "flipkart", "myntra", "blinkit")

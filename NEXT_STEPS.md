@@ -41,9 +41,9 @@ headed Chromium, real Chrome with a persistent profile, mobile user-agents, and 
 `api.*.meesho.com` subdomain. `Accumulate_Price_Maker` and `PriceChecker` both hit the same wall
 independently — PriceChecker's README says so outright.
 
-Bright Data would have solved it but needs a card, and Meesho had no `Meesho SP` column to check
-drift against anyway. **No Bright Data account is needed.** If Meesho ever matters, the free
-route is a supplier-panel export joined on SKU, not scraping.
+A paid unblocker would have solved it but needs a card, and Meesho had no `Meesho SP` column to
+check against anyway. If Meesho ever matters, the free route is a supplier-panel export joined
+on SKU, not scraping.
 
 ---
 
@@ -164,6 +164,12 @@ Being explicit about what has *not* been proven, rather than implying it has:
   still stored per cell, so a drift reading can come back without a scrape or a schema change.
 - **Price history.** `price_snapshots` is append-only, so trend charts and "cheapest ever" are
   available later with no schema change. Not built — say the word.
-- **Bright Data is dormant, not removed.** `fetch.py` keeps an escalation path that fires only
-  if a direct fetch is refused; with no key configured it never runs. Left in as insurance if a
-  marketplace starts blocking this IP — deleting it would mean rebuilding it under pressure.
+- ~~**Bright Data is dormant, not removed.**~~ **Removed**, 7 Aug 2026. It never fired once —
+  every marketplace has always succeeded on the direct path — so it was a paid dependency, a
+  credit budget, two settings fields and ~80 lines of routing describing a situation that has
+  not happened. Gone: `desktop/budget.py`, the `_unlock` tier, `BRIGHTDATA_*` settings, the
+  credits counter and the GUI's budget line. Verified absent from the built .exe.
+
+  The database keeps `runs.credits_used` and allows `'brightdata'` in the `via` CHECK
+  constraint. That is deliberate: historical rows must stay valid, and dropping a column from a
+  live table buys nothing. Nothing writes either value now.

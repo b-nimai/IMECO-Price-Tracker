@@ -24,7 +24,6 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import catalogue, schedule
-from .budget import Budget
 from .catalogue import load_products
 from .config import load_settings, save_setting
 from .fetch import Fetcher
@@ -40,8 +39,6 @@ DANGER = "#f43f5e"
 SETTING_LABELS = {
     "SUPABASE_URL": ("Supabase Project URL", "https://xxxxxxxx.supabase.co"),
     "SUPABASE_SERVICE_KEY": ("Supabase service_role key", "secret — never shared"),
-    "BRIGHTDATA_API_KEYS": ("Bright Data API key", "comma-separate for a key pool"),
-    "BRIGHTDATA_ZONE": ("Bright Data Web Unlocker zone", "e.g. imeco_unlocker"),
 }
 
 
@@ -128,8 +125,7 @@ class App:
 
     def refresh_status(self) -> None:
         settings = load_settings()
-        budget = Budget()
-        bits = [f"Bright Data {budget.used}/{budget.ceiling} this month"]
+        bits: list[str] = []
         if missing := settings.missing():
             bits.append(f"missing: {', '.join(m.split('_')[0].lower() for m in missing)}")
         if schedule.is_registered():
@@ -165,15 +161,12 @@ class App:
         try:
             settings = load_settings()
             products = load_products()
-            budget = Budget()
 
             def progress(marketplace: str, done: int, total: int) -> None:
                 self.events.put(("progress", marketplace, done, total))
 
-            with Fetcher(settings, budget) as fetcher:
+            with Fetcher(settings) as fetcher:
                 results = scrape(products, fetcher, progress)
-                credits = fetcher.credits_used
-            budget.save()
 
             from .store import Store
 
@@ -181,10 +174,10 @@ class App:
                 store.sync_products(products)
                 run_id = store.start_run(source)
                 store.save_snapshots(run_id, results)
-                store.finish_run(run_id, [c for _, c in results], credits)
+                store.finish_run(run_id, [c for _, c in results])
 
             ok = sum(c.status is Status.OK for _, c in results)
-            self.events.put(("done", ok, len(results), credits))
+            self.events.put(("done", ok, len(results)))
         except Exception as exc:  # surfaced in the window rather than a silent death
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
@@ -201,9 +194,9 @@ class App:
                     bar["value"] = done
                     self.labels[marketplace].config(text=f"{done}/{total}", fg=FG)
                 elif event[0] == "done":
-                    _, ok, total, credits = event
+                    _, ok, total = event
                     self.subtitle.config(
-                        text=f"Done — {ok} live prices saved, {credits} credits used", fg=ACCENT
+                        text=f"Done — {ok} live prices saved", fg=ACCENT
                     )
                     self._finish()
                 elif event[0] == "error":
@@ -238,8 +231,6 @@ class App:
         current = {
             "SUPABASE_URL": settings.supabase_url,
             "SUPABASE_SERVICE_KEY": settings.supabase_service_key,
-            "BRIGHTDATA_API_KEYS": ",".join(settings.brightdata_keys),
-            "BRIGHTDATA_ZONE": settings.brightdata_zone,
         }
         entries: dict[str, tk.Entry] = {}
 

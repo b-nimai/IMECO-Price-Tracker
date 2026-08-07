@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .adapters import PARSERS
-from .budget import Budget
 from .catalogue import load_products
 from .config import load_settings
 from .fetch import Fetcher
@@ -184,7 +183,6 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = load_settings()
     products = load_products()
-    budget = Budget()
     started = time.monotonic()
 
     print(f"{len(products)} products, {sum(len(p.urls) for p in products)} listings")
@@ -193,17 +191,15 @@ def main(argv: list[str] | None = None) -> int:
         args.dry_run = True
     print()
 
-    with Fetcher(settings, budget) as fetcher:
+    with Fetcher(settings) as fetcher:
         results = scrape(products, fetcher)
-        credits = fetcher.credits_used
-    budget.save()
 
     elapsed = time.monotonic() - started
     for marketplace in MARKETPLACES:
         counts = summarise(results).get(marketplace, {})
         detail = "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
         print(f"  {marketplace:<9} {detail}")
-    print(f"\n{elapsed / 60:.1f} min   credits {credits}   monthly {budget.used}/{budget.ceiling}")
+    print(f"\n{elapsed / 60:.1f} min")
 
     if args.fixture:
         write_fixture(Path(args.fixture), products, results)
@@ -219,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         store.sync_products(products)
         run_id = store.start_run(args.source)
         written = store.save_snapshots(run_id, results)
-        store.finish_run(run_id, [c for _, c in results], credits)
+        store.finish_run(run_id, [c for _, c in results])
     print(f"\nstored {written} snapshots (run {run_id})")
     return 0
 

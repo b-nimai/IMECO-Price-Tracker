@@ -236,9 +236,12 @@ npm run build
   none of the five sites offers a public price API. When a site redesigns, its column fills with
   `error`. Run `python -m desktop.probe` — it checks every adapter against listings whose live
   values were confirmed by hand, so a failure there means the adapter broke, not the listing.
-- **Bright Data is optional and currently unused.** `fetch.py` keeps an escalation path that
-  fires only if a direct fetch is refused; with no key configured it stays dormant. It is
-  insurance in case a marketplace starts blocking this IP, not a dependency.
+- **There is no paid fallback, by design.** `fetch.py` has one tier: a direct request from
+  this machine's residential IP. If a marketplace starts refusing it, those cells report
+  `blocked` and the dashboard leaves them unshaded — an honest gap rather than a silent bill.
+  Reintroducing an unblocker later is a change to `fetch_html`'s failure branch and nothing
+  else. **The per-host throttle in `fetch.py` is now the only thing preventing a block**, so
+  shortening it to make runs finish faster is a false economy.
 - **The board goes stale if nobody runs the app.** That is what the amber/red staleness badge
   and the Scheduled Task are for. Do not remove either.
 - **`.env` is gitignored and holds a live key.** Check before committing.

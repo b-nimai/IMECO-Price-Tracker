@@ -6,8 +6,9 @@
 # Output: desktop/dist/IMECO Price Tracker.exe — a single file needing no Python install on
 # the machine it runs on.
 #
-# No secrets are baked in. The app collects them on first launch and stores them in Windows
-# Credential Manager, so this .exe is safe to copy to another staff PC.
+# No secrets are baked in. The app collects the Supabase URL and service_role key on first
+# launch and stores them in Windows Credential Manager, so this .exe is safe to copy to
+# another staff PC.
 
 # "Continue", not "Stop", and that is deliberate. Under Windows PowerShell 5.1 anything a
 # native .exe writes to stderr is re-raised as a NativeCommandError, so with "Stop" a single
@@ -93,4 +94,4 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 $exe = Join-Path $PSScriptRoot "dist\IMECO Price Tracker.exe"
 $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 Write-Host "`nBuilt: $exe ($size MB)" -ForegroundColor Green
-Write-Host "First launch will prompt for the Supabase and Bright Data keys." -ForegroundColor Gray
+Write-Host "First launch will prompt for the Supabase URL and service_role key." -ForegroundColor Gray
