@@ -86,6 +86,22 @@ def parse(html: str, url: str) -> Cell:
                 in_stock = str(blob["state"]).lower() == "available"
 
     if price is None:
+        # Blinkit publishes the product page for a SKU no dark store currently carries: the
+        # JSON-LD is well-formed, says OutOfStock, and quotes `price: 0` — its way of saying
+        # "there is no offer here". `to_price` rejects the 0 (a zero price is never real), so
+        # nothing is left to report.
+        #
+        # That is OUT OF STOCK, not an error. `error` means the page defeated the parser and
+        # somebody should look at the adapter; this page was read perfectly and simply says the
+        # item cannot be bought. Filing it as `error` sent people hunting a bug that was not
+        # there, and buried the one signal that would matter if the markup really did change.
+        if in_stock is False:
+            return Cell(
+                marketplace="blinkit",
+                status=Status.OUT_OF_STOCK,
+                url=url,
+                note="listed on Blinkit, but no store is carrying it",
+            )
         return Cell(
             marketplace="blinkit",
             status=Status.ERROR,

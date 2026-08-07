@@ -86,7 +86,9 @@ def _fetch_blinkit(url: str, fetcher: Fetcher) -> Cell:
             return cell
 
     assert first is not None  # BLINKIT_LOCATIONS is never empty
-    if first.status is Status.OUT_OF_STOCK:
+    # Only if the adapter had nothing more specific to say. "no store is carrying it" is a
+    # better answer than "out of stock in three cities" and must not be overwritten by it.
+    if first.status is Status.OUT_OF_STOCK and not first.note:
         first.note = "out of stock in " + ", ".join(c for c, _ in BLINKIT_LOCATIONS)
     return first
 
