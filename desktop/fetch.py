@@ -18,6 +18,7 @@ an unblocker later is a change to `_direct`'s failure branch and nothing else.
 
 from __future__ import annotations
 
+import os
 import random
 import re
 import threading
@@ -49,6 +50,39 @@ HEADERS = {
     "sec-fetch-site": "none",
     "sec-fetch-user": "?1",
     "upgrade-insecure-requests": "1",
+}
+
+# ── Blinkit's delivery location ─────────────────────────────────────────────────────────
+#
+# Blinkit is HYPERLOCAL: both stock and price come from the dark store serving a delivery
+# location, and with no location sent it answers as if nothing is deliverable.
+#
+# Measured across all 15 Blinkit listings, no-location vs Salt Lake Sector V:
+#   * 11 of 15 gave a different answer.
+#   * IMEBW72 read OutOfStock while the same page in Kolkata was in stock at ₹189.
+#   * Two listings reported a WRONG PRICE — ₹449 for an item selling at ₹199, and ₹405 for one
+#     at ₹189 — lifted from a recommendation tile because the product's own data was absent.
+#     That fallback is gone (see adapters/blinkit.py); the location stops it arising at all.
+#
+# WHY THREE CITIES, TRIED IN ORDER: a dark store that has run out is not the same thing as a
+# product IMECO no longer sells, but a single-city check cannot tell those apart — one empty
+# Kolkata store paints the cell red. Asking Bengaluru and then Mumbai answers the question the
+# board is really being asked: is this listing live and at what price. Kolkata is first because
+# it is the home market, so its price wins whenever it has stock.
+#
+# The search STOPS at the first city with stock, so a listing that is in stock in Kolkata costs
+# exactly one request — same as before. Only genuinely-unavailable listings pay for all three,
+# and `Cell.note` records which city answered so a price from Mumbai is never mistaken for a
+# local one.
+BLINKIT_LOCATIONS: tuple[tuple[str, dict[str, str]], ...] = (
+    ("Kolkata", {"lat": os.environ.get("BLINKIT_LAT", "22.5726"),
+                 "lon": os.environ.get("BLINKIT_LON", "88.4310")}),
+    ("Bengaluru", {"lat": "12.9716", "lon": "77.5946"}),
+    ("Mumbai", {"lat": "19.0760", "lon": "72.8777"}),
+)
+
+_MARKETPLACE_HEADERS: dict[str, dict[str, str]] = {
+    "blinkit": BLINKIT_LOCATIONS[0][1],
 }
 
 #: Politeness window between two requests to the SAME host, seconds. Different hosts run in
@@ -133,20 +167,22 @@ class Fetcher:
     def close(self) -> None:
         self._client.close()
 
-    def fetch_html(self, marketplace: str, url: str) -> FetchResult:
+    def fetch_html(
+        self, marketplace: str, url: str, context: dict[str, str] | None = None
+    ) -> FetchResult:
         """Get a listing's HTML.
 
-        `marketplace` is unused now that there is one path for every host. It stays in the
-        signature because it is the natural place for any future per-marketplace policy, and
-        because every call site already passes it.
+        `context` overrides the marketplace's default extra headers — used to ask Blinkit the
+        same page from a different delivery location.
         """
+        extra = context if context is not None else _MARKETPLACE_HEADERS.get(marketplace)
         host = httpx.URL(url).host or url
         last_note = "no response"
 
         for attempt in range(MAX_RETRIES + 1):
             self._throttle.wait(host)
             try:
-                response = self._client.get(url)
+                response = self._client.get(url, headers=extra)
             except httpx.HTTPError as exc:
                 last_note = f"{type(exc).__name__}: {exc}"
             else:

@@ -16,7 +16,6 @@ import {
   NO_DATA,
   NO_DATA_INK,
   OUT_OF_STOCK,
-  discountLabel,
   fill,
   position,
   rowDomain,
@@ -49,8 +48,8 @@ const MRP_LEFT = 'left-[10.25rem] lg:left-[calc(var(--name-w)+2px)]';
  * grid does not occupy. gridFit.ts hardcodes this 1.15 — change both together.
  *
  * The ratios are the dispatch dashboard's: 1x cells, 0.9x heads, 1.1x the summary row, 2x for
- * the header height. SUB_TEXT (the "40% off" beside a price) is the one addition — that board
- * has no per-cell annotation.
+ * the header height. SUB_TEXT is the one addition — it labels the non-price states ("out of
+ * stock", "blocked"), which that board has no equivalent of.
  *
  * SUMMARY_TEXT is the summary figures now sharing the single header row with the column
  * labels — 1.1x, inside a 2x band. gridFit.ts assumes that fits; see HEAD_LINE there.
@@ -82,7 +81,7 @@ interface Props {
  * to rank it against (plain), and no price at all (black). A black cell asserts nothing — it
  * must never be mistakable for a cheap one, which is why blocked and unlisted land there too.
  */
-function cellChrome(cell: Cell, row: Row, domain: number[]) {
+function cellChrome(cell: Cell, domain: number[]) {
   const blank = {
     style: { backgroundColor: NO_DATA, color: NO_DATA_INK } as CSSProperties,
     className: '',
@@ -90,7 +89,10 @@ function cellChrome(cell: Cell, row: Row, domain: number[]) {
     sub: null as string | null,
   };
 
-  if (cell.status === 'not_listed') return blank;
+  // Spelled out rather than left as a dot. "No link available" is a job for whoever maintains
+  // the spreadsheet, and a bare `·` never once read as one. It goes in the SUB slot so it stays
+  // visually subordinate to the prices around it — it is a note, not a value.
+  if (cell.status === 'not_listed') return { ...blank, text: '', sub: 'No Link Available' };
 
   if (cell.status === 'blocked') {
     // Hatched over the black, so "we could not look" stays distinguishable from "there is
@@ -117,22 +119,28 @@ function cellChrome(cell: Cell, row: Row, domain: number[]) {
   }
 
   const price = cell.price;
-  if (price == null) return blank;
 
-  const mrp = cell.mrp ?? row.mrp;
-  const discount = discountLabel(price, mrp);
-
+  // Checked BEFORE the missing-price case below, because the two overlap: an Amazon listing
+  // with no buybox is out of stock AND has no number. Handled the other way round it fell
+  // through to a black dot, which — now that "no link" is spelled out in the same black — read
+  // as "we hold no link for this", when in fact we hold one and Amazon is simply not selling.
   if (cell.status === 'out_of_stock') {
     // Red, and outside the ranking entirely. The price is still true — it is what the item
     // costs when stock returns — but it is not a price anyone can pay today, so letting it
     // compete for "highest realised" would rank a sale that is not happening.
+    //
+    // No caption: red already carries the meaning on every cell that has it, and the words
+    // were crowding the price. The tooltip still spells it out. An em dash stands in where
+    // there is no price to show, so the cell is never an empty red box.
     return {
       style: { backgroundColor: OUT_OF_STOCK, color: INK } as CSSProperties,
       className: '',
-      text: formatPrice(price),
-      sub: 'out of stock',
+      text: price != null ? formatPrice(price) : '—',
+      sub: null,
     };
   }
+
+  if (price == null) return blank;
 
   const t = position(price, domain);
 
@@ -144,7 +152,7 @@ function cellChrome(cell: Cell, row: Row, domain: number[]) {
       style: { boxShadow: 'inset 0 0 0 1px var(--border)' } as CSSProperties,
       className: 'text-foreground',
       text: formatPrice(price),
-      sub: discount,
+      sub: null,
     };
   }
 
@@ -152,7 +160,7 @@ function cellChrome(cell: Cell, row: Row, domain: number[]) {
     style: { backgroundColor: fill(t), color: INK } as CSSProperties,
     className: '',
     text: formatPrice(price),
-    sub: discount,
+    sub: null,
   };
 }
 
@@ -341,7 +349,7 @@ export function Heatmap({ rows }: Props) {
 
                 {MARKETPLACES.map((m) => {
                   const cell = row.cells[m];
-                  const chrome = cellChrome(cell, row, domain);
+                  const chrome = cellChrome(cell, domain);
                   // Annotation sits INLINE with the price, not stacked. See gridFit.ts — a second
                   // line per row costs ~8 products off the bottom of a 1080 screen.
                   //

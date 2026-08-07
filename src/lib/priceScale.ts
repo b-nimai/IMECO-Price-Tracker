@@ -68,15 +68,9 @@ export function fill(t: number): string {
   return `color-mix(in oklab, ${HIGH_PRICE} ${pct.toFixed(1)}%, ${LOW_PRICE})`;
 }
 
-/**
- * The discount annotation beside a price — the one number the old three-metric toggle is now
- * reduced to. `null` where there is no MRP to measure against, or where the "discount" would be
- * zero or negative, because "0% off" is noise on 32 rows.
- */
-export function discountLabel(price: number | null, mrp: number | null | undefined): string | null {
-  if (price == null || price <= 0 || mrp == null || mrp <= price) return null;
-  return `${(((mrp - price) / mrp) * 100).toFixed(0)}% off`;
-}
+// The per-cell "N% off" annotation was removed: the MRP column already anchors every row, and
+// the discount ran opposite to the colour (deepest discount = lowest realised price = yellow),
+// which made the two readings argue with each other on the same cell.
 
 export const LEGEND =
   'colour ranks the live selling price within each row · green = highest realised · ' +

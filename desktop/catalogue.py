@@ -49,13 +49,23 @@ def active_workbook() -> Path:
 
 
 def workbook_status() -> tuple[Path, bool, str]:
-    """(path, is_operator_supplied, human date) — for the GUI's status line."""
+    """(path, is_operator_supplied, human date) — for the GUI's status line.
+
+    A date is reported only for an OPERATOR-SUPPLIED sheet, because only that one has a
+    meaningful date. PyInstaller extracts the bundled workbook into a fresh temporary
+    directory on every launch, so its mtime is the moment the app was opened — the built-in
+    sheet was displaying "07 Aug 2026 19:46" when 19:46 was simply when someone double-clicked
+    the .exe. A timestamp that changes every launch is worse than none: it reads as "this sheet
+    is up to date" no matter how old the bundled data actually is.
+    """
     path = active_workbook()
+    if path != USER_WORKBOOK:
+        return path, False, "shipped with this app"
     try:
-        stamp = datetime.fromtimestamp(path.stat().st_mtime).strftime("%d %b %Y %H:%M")
+        stamp = "uploaded " + datetime.fromtimestamp(path.stat().st_mtime).strftime("%d %b %Y %H:%M")
     except OSError:
-        stamp = "unknown date"
-    return path, path == USER_WORKBOOK, stamp
+        stamp = "uploaded, date unknown"
+    return path, True, stamp
 
 
 def install_workbook(source: Path) -> list[Product]:

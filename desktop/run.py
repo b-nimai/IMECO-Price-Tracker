@@ -23,11 +23,72 @@ from pathlib import Path
 from .adapters import PARSERS
 from .catalogue import load_products
 from .config import load_settings
-from .fetch import Fetcher
+from .fetch import BLINKIT_LOCATIONS, Fetcher
 from .models import MARKETPLACES, Cell, Product, Status, Via
 
 ProgressFn = Callable[[str, int, int], None]
 """(marketplace, done, total) — called after each listing so the GUI can draw a bar."""
+
+
+def _fetch_one(
+    marketplace: str, url: str, fetcher: Fetcher, context: dict[str, str] | None = None
+) -> Cell:
+    """One request, parsed into a Cell. Never raises."""
+    result = fetcher.fetch_html(marketplace, url, context)
+
+    if result.ok and result.html is not None:
+        try:
+            cell = PARSERS[marketplace](result.html, url)
+        except Exception as exc:
+            # An adapter must never take the run down. A page it cannot read is a signal
+            # worth seeing, not a crash.
+            cell = Cell(
+                marketplace=marketplace,
+                status=Status.ERROR,
+                url=url,
+                note=f"parser raised {type(exc).__name__}: {exc}",
+            )
+        cell.via = result.via
+        return cell
+
+    return Cell(
+        marketplace=marketplace,
+        status=result.status or Status.ERROR,
+        url=url,
+        via=result.via,
+        note=result.note,
+    )
+
+
+def _fetch_blinkit(url: str, fetcher: Fetcher) -> Cell:
+    """Ask Blinkit for one listing, trying each city until one has it in stock.
+
+    Blinkit answers per dark store, so "out of stock" from a single city means only that ONE
+    store is empty — which is not the question the board is asking. Walking Kolkata, then
+    Bengaluru, then Mumbai answers it properly: is this listing live anywhere, and at what price.
+
+    Stops at the first city with stock, so anything available in Kolkata costs exactly one
+    request. Only genuinely unavailable listings pay for all three. If none has stock, the FIRST
+    city's answer is kept — the home market is the honest thing to report as unavailable, and it
+    carries the real price the item returns at.
+    """
+    first: Cell | None = None
+
+    for city, context in BLINKIT_LOCATIONS:
+        cell = _fetch_one("blinkit", url, fetcher, context)
+        if first is None:
+            first = cell
+        if cell.status is Status.OK:
+            # Say where it came from whenever that is not the home market, so a Bengaluru price
+            # on the wall is never read as one a Kolkata customer can pay.
+            if city != BLINKIT_LOCATIONS[0][0]:
+                cell.note = f"in stock in {city}; not in {BLINKIT_LOCATIONS[0][0]}"
+            return cell
+
+    assert first is not None  # BLINKIT_LOCATIONS is never empty
+    if first.status is Status.OUT_OF_STOCK:
+        first.note = "out of stock in " + ", ".join(c for c, _ in BLINKIT_LOCATIONS)
+    return first
 
 
 def _scrape_marketplace(
@@ -42,29 +103,10 @@ def _scrape_marketplace(
 
     for i, product in enumerate(listed, start=1):
         url = product.url_for(marketplace) or ""
-        result = fetcher.fetch_html(marketplace, url)
-
-        if result.ok and result.html is not None:
-            try:
-                cell = PARSERS[marketplace](result.html, url)
-            except Exception as exc:
-                # An adapter must never take the run down. A page it cannot read is a signal
-                # worth seeing, not a crash.
-                cell = Cell(
-                    marketplace=marketplace,
-                    status=Status.ERROR,
-                    url=url,
-                    note=f"parser raised {type(exc).__name__}: {exc}",
-                )
-            cell.via = result.via
+        if marketplace == "blinkit":
+            cell = _fetch_blinkit(url, fetcher)
         else:
-            cell = Cell(
-                marketplace=marketplace,
-                status=result.status or Status.ERROR,
-                url=url,
-                via=result.via,
-                note=result.note,
-            )
+            cell = _fetch_one(marketplace, url, fetcher)
 
         out.append((product.sku, cell))
         if on_progress:

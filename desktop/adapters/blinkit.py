@@ -26,23 +26,28 @@ _PRID = re.compile(r"/prid/(\d+)")
 
 
 def _state_blob(html: str, url: str) -> dict | None:
-    """The page's OWN product state, not a recommendation tile's.
+    """The page's OWN product state, or None. Never a neighbouring product's.
 
     Blinkit embeds a priced `product_id` object for every card on the page, including the
-    "you might also like" rail — and the rail's objects come first in the markup. Matching on
-    the prid from the URL is what stops a neighbouring product's price being read as this
-    one's. Only if no blob carries the right id do we fall back to the first priced one.
-    """
-    blobs = [b for b in find_json_objects(html, "product_id") if to_price(b.get("price"))]
-    if not blobs:
-        return None
+    "you might also like" rail — and the rail's objects come first in the markup. So the only
+    safe way to identify this product's data is the prid from the URL.
 
+    THERE IS DELIBERATELY NO FALLBACK. An earlier version returned the first priced block when
+    no id matched, and it published two wrong prices: ₹449 for an item selling at ₹199, and
+    ₹405 for one at ₹189, both lifted from a recommendation tile for a different pack. Those
+    numbers were indistinguishable from correct ones on the wall.
+
+    When this returns None the caller still has the page's own JSON-LD, which is genuinely
+    scoped to this product — so the outcome is a price with less detail, or an honest `error`,
+    never a confident wrong number.
+    """
     m = _PRID.search(url)
-    if m:
-        for blob in blobs:
-            if str(blob.get("product_id")) == m.group(1):
-                return blob
-    return blobs[0]
+    if not m:
+        return None
+    for blob in find_json_objects(html, "product_id"):
+        if str(blob.get("product_id")) == m.group(1) and to_price(blob.get("price")):
+            return blob
+    return None
 
 
 def parse(html: str, url: str) -> Cell:

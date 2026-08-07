@@ -99,6 +99,37 @@ def is_registered() -> bool:
     return _run(["schtasks", "/Query", "/TN", TASK_NAME]).returncode == 0
 
 
+def registered_command() -> str | None:
+    """The command the existing task actually runs, or None if there is no task.
+
+    Read back from Windows rather than remembered, because the interesting case is when they
+    DISAGREE — see `is_stale()`.
+    """
+    result = _run(["schtasks", "/Query", "/TN", TASK_NAME, "/FO", "LIST", "/V"])
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        if line.strip().lower().startswith("task to run:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def is_stale() -> bool:
+    """True when a task exists but runs something other than what THIS app would register.
+
+    The case this exists for: the task is first registered from a source checkout (pythonw +
+    desktop_entry.py), then the app is packaged and the .exe becomes how it is really run. The
+    task keeps pointing at the checkout, so the hourly scrape silently depends on a folder and
+    a conda install that nobody thinks of as production any more — and breaks the moment either
+    moves. Without this check the app would never notice, because `is_registered()` is happy.
+    """
+    current = registered_command()
+    if current is None:
+        return False
+    program, arguments = _executable()
+    return f'"{program}" {arguments}'.strip().lower() != current.strip().lower()
+
+
 def register(minutes: int = DEFAULT_INTERVAL_MINUTES) -> tuple[bool, str]:
     """Create the repeating task. Returns (ok, message)."""
     if minutes < MIN_INTERVAL_MINUTES:

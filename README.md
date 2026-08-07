@@ -191,6 +191,26 @@ Only `ok` cells are ever shaded. This is also what makes a site redesign show up
 `error` rather than as stale numbers presented as live ones — enforced in Python
 (`models.Cell.__post_init__`) *and* as a database `CHECK` constraint.
 
+## Blinkit is hyperlocal — and that changes what a scrape means
+
+Blinkit answers from the dark store serving a delivery location. Send none and it reports
+almost everything as out of stock; send Kolkata and 11 of 15 listings give a different answer.
+Two listings were worse than wrong-status — they returned a *wrong price* (₹449 for an item
+selling at ₹199) because with the product's own data absent, the parser fell back to a
+recommendation tile for a different pack. That fallback is gone.
+
+So a Blinkit listing is checked against three cities in order — **Kolkata, Bengaluru, Mumbai**
+— and the search **stops at the first one with stock**:
+
+- In stock in Kolkata (the home market) → its price, one request, same cost as before.
+- Out of stock there but in stock elsewhere → that city's price, and the cell's tooltip says
+  `in stock in Bengaluru; not in Kolkata`, so an out-of-town price is never read as a local one.
+- Nowhere in stock → Kolkata's answer, marked out of stock in all three.
+
+One empty local dark store is not the same thing as a product IMECO no longer sells, and a
+single-city check cannot tell those apart. Override the home market per machine with
+`BLINKIT_LAT` / `BLINKIT_LON`.
+
 ## The colour rule
 
 One rule, no toggle. Within a single product row, the colour ranks that marketplace's live

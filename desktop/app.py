@@ -120,6 +120,11 @@ class App:
             self.root.after(400, self.open_settings)
         elif not schedule.is_registered():
             self.root.after(400, self.offer_schedule)
+        elif schedule.is_stale():
+            # A task exists but points at something else — typically the source checkout it was
+            # first registered from, before this .exe existed. Left alone it keeps "working"
+            # until that folder moves, then fails hourly and silently.
+            self.root.after(400, self.offer_repoint)
 
     # ── status line ─────────────────────────────────────────────────────────────────────
 
@@ -129,7 +134,7 @@ class App:
         if missing := settings.missing():
             bits.append(f"missing: {', '.join(m.split('_')[0].lower() for m in missing)}")
         if schedule.is_registered():
-            bits.append(f"auto-run {schedule.describe()}")
+            bits.append(f"auto-run {schedule.describe()}{' (other copy)' if schedule.is_stale() else ''}")
         _, operator, stamp = catalogue.workbook_status()
         bits.append(f"sheet: {'yours' if operator else 'built-in'} ({stamp})")
         self.status.config(text="   ".join(bits))
@@ -311,7 +316,7 @@ class App:
             bg=BG, fg=FG, font=("Segoe UI", 9), anchor="w",
         ).pack(fill="x")
         tk.Label(
-            body, text=f"Updated: {stamp}", bg=BG, fg=MUTED, font=("Consolas", 9), anchor="w"
+            body, text=stamp, bg=BG, fg=MUTED, font=("Consolas", 9), anchor="w"
         ).pack(fill="x", pady=(2, 0))
         tk.Label(
             body, text=summary, bg=BG, fg=MUTED, font=("Consolas", 9),
@@ -389,6 +394,22 @@ class App:
         ).pack(side="left", padx=6)
 
     # ── scheduling ──────────────────────────────────────────────────────────────────────
+
+    def offer_repoint(self) -> None:
+        if messagebox.askyesno(
+            "Update the automatic run?",
+            "The hourly task is set up to run a different copy of this app:
+
+"
+            f"{schedule.registered_command()}
+
+"
+            "Point it at this one instead? Recommended — otherwise the automatic updates stop "
+            "working if that copy is moved or deleted.",
+        ):
+            ok, message = schedule.register()
+            messagebox.showinfo("Automatic updates" if ok else "Could not schedule", message)
+            self.refresh_status()
 
     def offer_schedule(self) -> None:
         if messagebox.askyesno(

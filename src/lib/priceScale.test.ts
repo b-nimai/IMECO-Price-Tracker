@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { HIGH_PRICE, LOW_PRICE, discountLabel, fill, position, rowDomain } from './priceScale';
+import { HIGH_PRICE, LOW_PRICE, fill, position, rowDomain } from './priceScale';
 
 describe('rowDomain', () => {
   it('sorts ascending and drops absent prices', () => {
@@ -89,20 +89,5 @@ describe('fill', () => {
   it('clamps rather than emitting an out-of-range mix', () => {
     expect(fill(-1)).toContain('0.0%');
     expect(fill(2)).toContain('100.0%');
-  });
-});
-
-describe('discountLabel', () => {
-  it('reports the discount off MRP', () => {
-    // B0GLNWPCPT: live 301 against MRP 499.
-    expect(discountLabel(301, 499)).toBe('40% off');
-    expect(discountLabel(89, 249)).toBe('64% off');
-  });
-
-  it('says nothing when there is no discount to report', () => {
-    expect(discountLabel(500, 500)).toBeNull();
-    expect(discountLabel(520, 500)).toBeNull();
-    expect(discountLabel(299, null)).toBeNull();
-    expect(discountLabel(null, 499)).toBeNull();
   });
 });
