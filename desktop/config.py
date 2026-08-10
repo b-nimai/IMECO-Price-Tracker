@@ -1,13 +1,17 @@
 """Where secrets come from.
 
-Two sources, in priority order:
+Sources, in priority order:
 
-  1. Windows Credential Manager (via `keyring`) — what the packaged .exe uses.
-  2. A `.env` file — development convenience when running from source.
+  1. Windows Credential Manager (via `keyring`) — set by the app's first-run prompt.
+  2. A real environment variable — for CI and one-offs.
+  3. A `.env` file — development convenience when running from source.
+  4. Secrets baked in at build time — the last-resort fallback, so a freshly copied .exe
+     starts working without a setup prompt.
 
-The ordering matters. The Supabase service_role key can write to the database, so it must not
-be compiled into a distributed .exe where anyone could pull it out with a hex editor. Credential
-Manager keeps it per-machine and per-user instead.
+The ordering matters. The Supabase service_role key can write to the database, so a baked-in
+copy is recoverable from the .exe by anyone holding the file: treat any build made with baked
+secrets as internal-only, and rotate the key in Supabase if such a build ever leaves IMECO.
+Credential Manager remains the preferred source and always wins over the baked value.
 """
 
 from __future__ import annotations
@@ -53,6 +57,21 @@ def _from_keyring(name: str) -> str | None:
         return None
 
 
+def _from_baked(name: str) -> str | None:
+    """Secrets written into the bundle by build.ps1, if that build had any.
+
+    `desktop/_baked.py` is generated immediately before PyInstaller runs and deleted
+    immediately after, so it exists on disk for the length of a build and never at rest. In a
+    source checkout this import simply fails and the function returns None.
+    """
+    try:
+        from . import _baked  # type: ignore[attr-defined]
+
+        return getattr(_baked, name, None)
+    except Exception:
+        return None
+
+
 @dataclass
 class Settings:
     supabase_url: str
@@ -76,8 +95,15 @@ def load_settings() -> Settings:
     env = _load_env_file()
 
     def get(name: str) -> str:
-        # Credential Manager wins; a real env var beats the .env file, for CI and one-offs.
-        return (_from_keyring(name) or os.environ.get(name) or env.get(name) or "").strip()
+        # Credential Manager wins; a real env var beats the .env file, for CI and one-offs;
+        # a baked-in build secret is the floor, so a copied .exe runs without being set up.
+        return (
+            _from_keyring(name)
+            or os.environ.get(name)
+            or env.get(name)
+            or _from_baked(name)
+            or ""
+        ).strip()
 
     return Settings(
         supabase_url=get("SUPABASE_URL").rstrip("/"),

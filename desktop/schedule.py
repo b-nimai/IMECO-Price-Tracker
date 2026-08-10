@@ -27,8 +27,10 @@ hour-old price, because it removes the number from the wall entirely.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 TASK_NAME = "IMECO Price Tracker"
@@ -84,6 +86,83 @@ def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
         text=True,
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
     )
+
+
+#: Task XML settings that must hold for an unattended hourly job, as (element, wanted value).
+#:
+#: The battery pair is the important one and it fails INVISIBLY. schtasks has no command-line
+#: switch for power conditions, so every task it creates carries the Task Scheduler UI defaults
+#: "Stop if the computer switches to battery power" and "Start the task only if the computer is
+#: on AC power". On a laptop that means unplugging silently suspends the scrape: Windows records
+#: result 0x800710E0 ("the operator or administrator has refused the request"), the app never
+#: hears about it, and the dashboard just quietly ages.
+#:
+#: StartWhenAvailable is the smaller one: without it a firing missed because the PC was asleep
+#: is dropped rather than run late. Windows omits this element entirely when it is false, so it
+#: has to be inserted rather than rewritten — see `_apply_setting`.
+_SETTING_FIXES = (
+    ("DisallowStartIfOnBatteries", "false"),
+    ("StopIfGoingOnBatteries", "false"),
+    ("StartWhenAvailable", "true"),
+)
+
+
+def _apply_setting(xml: str, element: str, wanted: str) -> str:
+    """Force one <Settings> child to `wanted`, whether or not Windows emitted it.
+
+    Absent elements are inserted directly after the opening <Settings> tag. That position is
+    load-bearing: the schema is order-sensitive, and appending before </Settings> lands after
+    <IdleSettings>, which is out of sequence and rejected.
+    """
+    present = re.search(f"<{element}>[^<]*</{element}>", xml)
+    if present:
+        return xml.replace(present.group(0), f"<{element}>{wanted}</{element}>")
+    return xml.replace(
+        "<Settings>", f"<Settings>\n    <{element}>{wanted}</{element}>", 1
+    )
+
+
+def _relax_power_conditions() -> None:
+    """Rewrite the task Windows just created so battery state cannot suspend it.
+
+    Round-trips through the task's own XML — export it, patch three booleans, import it back —
+    rather than composing XML by hand. The Task Scheduler schema requires <Settings> children in
+    a specific order and silently rejects the document otherwise, so starting from what Windows
+    itself emitted removes a whole class of breakage that would only show up as a failed import.
+
+    Best-effort by design: if any step fails the task still exists and still runs hourly on AC
+    power, which is the pre-existing behaviour. Registration must not fail over this.
+    """
+    try:
+        # Bytes, not text: /XML emits UTF-16 and decoding it as the console codepage yields
+        # mojibake or an exception depending on the machine.
+        exported = subprocess.run(
+            ["schtasks", "/Query", "/TN", TASK_NAME, "/XML"],
+            capture_output=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        if exported.returncode != 0:
+            return
+
+        raw = exported.stdout
+        xml = raw.decode("utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8")
+
+        for element, wanted in _SETTING_FIXES:
+            xml = _apply_setting(xml, element, wanted)
+
+        # schtasks /Create /XML only accepts a Unicode file; a UTF-8 one fails with a parse
+        # error that names no element and reads like the XML itself is malformed.
+        handle = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".xml", encoding="utf-16", delete=False
+        )
+        try:
+            handle.write(xml)
+            handle.close()
+            _run(["schtasks", "/Create", "/TN", TASK_NAME, "/XML", handle.name, "/F"])
+        finally:
+            Path(handle.name).unlink(missing_ok=True)
+    except Exception:
+        return
 
 
 def describe(minutes: int = DEFAULT_INTERVAL_MINUTES) -> str:
@@ -159,6 +238,8 @@ def register(minutes: int = DEFAULT_INTERVAL_MINUTES) -> tuple[bool, str]:
     )
     if result.returncode != 0:
         return False, (result.stderr or result.stdout).strip()[:200]
+
+    _relax_power_conditions()
     return True, f"Scheduled to run {describe(minutes)}."
 
 

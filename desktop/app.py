@@ -398,12 +398,8 @@ class App:
     def offer_repoint(self) -> None:
         if messagebox.askyesno(
             "Update the automatic run?",
-            "The hourly task is set up to run a different copy of this app:
-
-"
-            f"{schedule.registered_command()}
-
-"
+            "The hourly task is set up to run a different copy of this app:\n\n"
+            f"{schedule.registered_command()}\n\n"
             "Point it at this one instead? Recommended — otherwise the automatic updates stop "
             "working if that copy is moved or deleted.",
         ):
