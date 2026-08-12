@@ -34,6 +34,7 @@ BG = "#111111"
 FG = "#f1f5f9"
 MUTED = "#a1a1aa"
 ACCENT = "#22c55e"
+WARN = "#f59e0b"
 DANGER = "#f43f5e"
 
 SETTING_LABELS = {
@@ -135,9 +136,27 @@ class App:
             bits.append(f"missing: {', '.join(m.split('_')[0].lower() for m in missing)}")
         if schedule.is_registered():
             bits.append(f"auto-run {schedule.describe()}{' (other copy)' if schedule.is_stale() else ''}")
+
+        # Running on the built-in sheet is a WARNING, not a neutral fact, and it used to read as
+        # one — grey text saying "sheet: built-in" next to two other grey facts.
+        #
+        # What that hid, and it cost 13 SKUs a day of prices: the bundled sheet is frozen at
+        # whenever the .exe was built. If the operator's sheet is ever removed — the "use the
+        # built-in sheet" button unlinks it — every hourly run silently falls back to that
+        # older, usually SMALLER catalogue. The products it no longer lists simply stop being
+        # scraped, and because the dashboard reads the latest snapshot per SKU rather than the
+        # latest run, their final prices stay on the wall looking current indefinitely.
+        #
+        # Nothing else notices: the runs all succeed, exit 0, and report no errors. So the one
+        # place it can be caught is here, and it has to be loud enough to read as a problem.
         _, operator, stamp = catalogue.workbook_status()
-        bits.append(f"sheet: {'yours' if operator else 'built-in'} ({stamp})")
-        self.status.config(text="   ".join(bits))
+        if operator:
+            bits.append(f"sheet: yours ({stamp})")
+            self.status.config(text="   ".join(bits), fg=MUTED)
+            return
+
+        bits.append(f"sheet: BUILT-IN, not yours ({stamp})")
+        self.status.config(text="   ".join(bits), fg=WARN)
 
     # ── the run ─────────────────────────────────────────────────────────────────────────
 
