@@ -47,7 +47,10 @@ class Via(str, Enum):
     """No request was made at all — the SKU has no link for this marketplace."""
 
 
-MARKETPLACES = ("amazon", "flipkart", "myntra", "blinkit")
+# Myntra was dropped — its prices are no longer wanted, so it is not scraped. The database
+# CHECK constraint still ALLOWS 'myntra' so historical snapshots stay valid; nothing writes it.
+# Mirrors src/data/types.ts — the two must stay in step.
+MARKETPLACES = ("amazon", "flipkart", "blinkit")
 
 
 @dataclass

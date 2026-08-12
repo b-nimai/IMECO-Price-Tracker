@@ -1,12 +1,14 @@
 // The shapes the dashboard works in, and the transform from Supabase rows into them.
 
-export const MARKETPLACES = ['amazon', 'flipkart', 'myntra', 'blinkit'] as const;
+// Myntra was dropped — its prices are no longer wanted. Historical myntra snapshots are still in
+// the database and are simply ignored here: `buildPriceData` skips any marketplace not in this
+// tuple, so nothing has to be deleted for the column to disappear.
+export const MARKETPLACES = ['amazon', 'flipkart', 'blinkit'] as const;
 export type Marketplace = (typeof MARKETPLACES)[number];
 
 export const MARKETPLACE_LABELS: Record<Marketplace, string> = {
   amazon: 'Amazon',
   flipkart: 'Flipkart',
-  myntra: 'Myntra',
   blinkit: 'Blinkit',
 };
 
@@ -43,8 +45,15 @@ export interface Row {
   cells: Record<Marketplace, Cell>;
   /** Cheapest live price across marketplaces, for the `cheapest` metric. */
   minPrice: number | null;
-  /** Live listings on this row — drives the default sort. */
+  /** In-stock listings on this row. Decides whether the row counts as listed at all. */
   liveCount: number;
+  /**
+   * How many cells actually show a number — drives the row sort, so the grid fills from the top.
+   *
+   * Deliberately NOT `liveCount`: an out-of-stock cell still prints its price, so sorting by
+   * live listings alone pushed visibly complete rows below rows with a blank in them.
+   */
+  pricedCount: number;
 }
 
 export interface PriceData {
@@ -168,6 +177,13 @@ export function buildPriceData(
     );
     const minPrice = buyable.length ? Math.min(...buyable.map((c) => c.price as number)) : null;
 
+    // Everything the grid draws as a number, in stock or not — see `Row.pricedCount`.
+    const priced = MARKETPLACES.filter(
+      (m) =>
+        cells[m].price != null &&
+        (cells[m].status === 'ok' || cells[m].status === 'out_of_stock'),
+    ).length;
+
     return {
       sku: product.sku,
       name: product.name,
@@ -176,6 +192,7 @@ export function buildPriceData(
       cells,
       minPrice,
       liveCount: buyable.length,
+      pricedCount: priced,
     };
   });
 

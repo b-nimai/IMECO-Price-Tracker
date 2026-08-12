@@ -18,7 +18,6 @@ from .fetch import Fetcher
 FIXTURES: list[tuple[str, str, str]] = [
     ("amazon", "https://www.amazon.in/dp/B0GLNWPCPT", "expect 299"),
     ("flipkart", "https://www.flipkart.com/product/p/itme?pid=KNRHKDXNWEFBN2GG", "expect fsp 336, mrp 499"),
-    ("myntra", "https://www.myntra.com/40002424", "expect 262, mrp 499"),
     ("blinkit", "https://blinkit.com/prn/-/prid/695492", "expect 89, mrp 249, in stock"),
     ("blinkit", "https://blinkit.com/prn/-/prid/691909", "expect 189, mrp 270, OUT OF STOCK"),
 ]

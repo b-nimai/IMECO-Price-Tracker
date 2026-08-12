@@ -1,6 +1,6 @@
 # IMECO Price Tracker
 
-Live selling prices for ~32 IMECO SKUs across **Amazon.in, Flipkart, Myntra and Blinkit**,
+Live selling prices for ~32 IMECO SKUs across **Amazon.in, Flipkart and Blinkit**,
 rendered as a SKU x marketplace heatmap.
 
 Two halves:
@@ -16,16 +16,15 @@ Two halves:
   │ IMECO Price Tracker.exe  │          │ products           │       │  React SPA     │
   │  ├ Amazon   direct HTTP  │──service─▶│ runs               │◀─anon─│  heatmap       │
   │  ├ Flipkart direct HTTP  │   key    │ price_snapshots    │  key  │  (static)      │
-  │  ├ Myntra   direct HTTP  │  INSERT  │ latest_prices view │ SELECT└────────────────┘
-  │  └ Blinkit  direct HTTP  │          └────────────────────┘
-  └──────────────────────────┘
+  │  └ Blinkit  direct HTTP  │  INSERT  │ latest_prices view │ SELECT└────────────────┘
+  └──────────────────────────┘          └────────────────────┘
 ```
 
 The dashboard polls every 2 minutes, so a scrape appears on screen without any redeploy.
 
 ## Why the scraper runs on a desktop
 
-Requests originate from a **residential IP**, which is why all four marketplaces work with a
+Requests originate from a **residential IP**, which is why all three marketplaces work with a
 plain HTTP client. The same requests from a cloud runner (Vercel, GitHub Actions) come
 from datacenter ranges that Amazon and Flipkart block far more aggressively.
 
@@ -63,8 +62,8 @@ reordering columns is safe. Recognised headers:
 SKU | Product Name | MRP | <Marketplace> SP | <Marketplace> Link
 ```
 
-for `Amazon`, `Flipkart`, `Myntra` and `Blinkit`. Anything else — `Meesho Link`, for instance —
-is ignored. A missing `<Marketplace> Link` means that cell renders as "not listed" rather than
+for `Amazon`, `Flipkart` and `Blinkit`. Anything else — `Meesho Link`, or the sheet's leftover
+`Myntra Link` column — is ignored. A missing `<Marketplace> Link` means that cell renders as "not listed" rather than
 as a failure.
 
 **Updating it does not need a rebuild.** The `.exe` ships with a copy of the sheet so a fresh
@@ -146,7 +145,6 @@ A full run takes **~3.5 minutes** for ~89 listings (more once Blinkit links are 
 |---|---|---|---|
 | Amazon | direct | `a-price-whole`, `displayPrice` | MRP from `apex-basisprice-value` |
 | Flipkart | direct | `ppd.fsp` in the embedded state | |
-| Myntra | direct | `"price":{"mrp":N,"discounted":M}` | |
 | Blinkit | direct | `schema.org/Product` JSON-LD | Also reports real stock status |
 
 **Meesho is not supported.** Its pages are behind an Akamai anti-bot wall that refused every
@@ -168,8 +166,6 @@ These are all real failures found while building, and each is guarded in code:
 - **Amazon per-unit price.** A loose `a-text-price` match picks up `apex-priceperunit-value`
   (e.g. ₹50.17 per 100 pulls) instead of the ₹499 list price. The MRP regex is pinned to
   `apex-basisprice-value`, and any MRP below the selling price is discarded.
-- **Myntra's API 401s.** `myntra.com/gateway/v2/product/{id}` needs a session; the HTML page is
-  the only way in.
 - **Blinkit MRPs differ from the sheet.** Blinkit carries its own pack configurations (one
   listing reports MRP 249 where the sheet says 270). The pinned MRP column shows the sheet's
   value; discount maths uses each marketplace's own reported MRP.

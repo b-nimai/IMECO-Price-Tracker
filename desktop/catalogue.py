@@ -117,8 +117,9 @@ HEADERS: dict[str, tuple[str, str]] = {
     "amazon link": ("amazon", "link"),
     "flipkart sp": ("flipkart", "sp"),
     "flipkart link": ("flipkart", "link"),
-    "myntra sp": ("myntra", "sp"),
-    "myntra link": ("myntra", "link"),
+    # The sheet still has "Myntra SP" / "Myntra Link" columns. They are deliberately NOT mapped:
+    # Myntra was dropped, and an unmapped header is simply ignored, so the links never reach
+    # `Product.urls` and never get counted as listings to fetch.
     "blinkit sp": ("blinkit", "sp"),
     "blinkit link": ("blinkit", "link"),
 }
@@ -153,8 +154,6 @@ def parse_price(raw: object) -> float | None:
 _CANONICALISERS: dict[str, tuple[re.Pattern[str], str]] = {
     # ASIN. Handles both /dp/B0XXXXXXXX and the /IMECO-Baby-Wipes/dp/B0XXXXXXXX/ref=... form.
     "amazon": (re.compile(r"/dp/([A-Z0-9]{10})"), "https://www.amazon.in/dp/{}"),
-    # Myntra style id — the numeric path segment; the sheet has no slug.
-    "myntra": (re.compile(r"myntra\.com/(?:.*/)?(\d{5,})"), "https://www.myntra.com/{}"),
     # Blinkit product id.
     "blinkit": (re.compile(r"/prid/(\d+)"), "https://blinkit.com/prn/-/prid/{}"),
 }

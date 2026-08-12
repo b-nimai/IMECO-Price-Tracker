@@ -11,10 +11,15 @@ interface Props {
 
 export function HeatmapView({ rows, showUnlisted }: Props) {
   const visible = useMemo(() => {
-    // Most live listings first, then deepest catalogue presence. A product selling on four
-    // marketplaces is simply more of the business than one selling on none.
+    // Most prices first, so the grid fills from the top and the gaps collect at the bottom.
+    // `pricedCount` counts every cell that shows a number, which is what someone reading the
+    // board actually sees; `liveCount` breaks the tie so an in-stock row outranks an equally
+    // full one that cannot be bought.
     const sorted = [...rows].sort(
-      (a, b) => b.liveCount - a.liveCount || a.name.localeCompare(b.name),
+      (a, b) =>
+        b.pricedCount - a.pricedCount ||
+        b.liveCount - a.liveCount ||
+        a.name.localeCompare(b.name),
     );
     return showUnlisted ? sorted : sorted.filter((r) => r.liveCount > 0);
   }, [rows, showUnlisted]);
