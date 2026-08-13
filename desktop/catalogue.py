@@ -226,6 +226,11 @@ def load_products(path: Path | None = None) -> list[Product]:
             name=str(row[name_col] or "").strip(),
             mrp=parse_price(row[mrp_col]) if mrp_col is not None else None,
             starred=STAR in str(row[sku_col] or ""),
+            # Position among PARSED rows, not among worksheet rows: blank spacers are skipped
+            # above, and a gap in the numbering would otherwise appear wherever the sheet has
+            # one. The dashboard only ever sorts on this, so density is what matters, not
+            # matching a row number in Excel.
+            position=len(products),
         )
 
         for i, (marketplace, kind) in cols.items():
@@ -245,7 +250,35 @@ def load_products(path: Path | None = None) -> list[Product]:
 
         products.append(product)
 
+    _reject_duplicates(products, path)
     return products
+
+
+def _reject_duplicates(products: list[Product], path: Path) -> None:
+    """A SKU may appear once. Refuse the sheet, by name, if one appears twice.
+
+    The SKU is the database's primary key, so a repeat makes the catalogue upsert fail with
+    `ON CONFLICT DO UPDATE command cannot affect row a second time` — a message that says
+    nothing to the person who typed the duplicate, arriving an hour later inside a scheduled
+    run that then stores nothing at all.
+
+    Raised from the parser so `install_workbook` catches it BEFORE the sheet is adopted: the
+    operator is told which SKU to fix while they are still looking at the file picker, and the
+    previous workbook stays in force meanwhile.
+    """
+    seen: set[str] = set()
+    repeated: list[str] = []
+    for product in products:
+        if product.sku in seen and product.sku not in repeated:
+            repeated.append(product.sku)
+        seen.add(product.sku)
+
+    if repeated:
+        listed = ", ".join(repeated)
+        raise ValueError(
+            f"{path.name}: the same SKU appears on more than one row ({listed}). "
+            "Every product needs its own SKU — merge or rename those rows and try again."
+        )
 
 
 def _main() -> int:

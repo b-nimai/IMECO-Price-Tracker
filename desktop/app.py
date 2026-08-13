@@ -27,7 +27,7 @@ from . import catalogue, schedule
 from .catalogue import load_products
 from .config import load_settings, save_setting
 from .fetch import Fetcher
-from .models import MARKETPLACES, Status
+from .models import MARKETPLACES, Product, Status
 from .run import scrape
 
 BG = "#111111"
@@ -205,6 +205,47 @@ class App:
         except Exception as exc:  # surfaced in the window rather than a silent death
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
+    # ── the catalogue ───────────────────────────────────────────────────────────────────
+
+    def push_catalogue(self, products: list[Product] | None = None) -> None:
+        """Mirror the sheet now in force into Supabase, without waiting for a scrape.
+
+        Called whenever the WORKBOOK changes, not whenever prices do. `store.sync_products`
+        also runs inside every scrape, so this is not what keeps the catalogue correct — it is
+        what keeps it correct SOONER. Product names, the row order and which SKUs exist at all
+        come from this table, so without this the wall display keeps showing the previous
+        sheet's names and order for up to an hour after the operator swapped it, and every one
+        of those minutes looks like the upload silently failed.
+
+        Threaded and silent about being unconfigured: this is a side effect of a button press
+        about a spreadsheet, and it must never block the window or turn into a dialog the
+        operator has to dismiss before they can get on.
+        """
+        settings = load_settings()
+        if not settings.can_store:
+            return
+
+        def work() -> None:
+            try:
+                items = load_products() if products is None else products
+                from .store import Store
+
+                with Store(settings) as store:
+                    store.sync_products(items)
+                self.events.put(("catalogue", f"Dashboard updated — {len(items)} products", True))
+            except Exception as exc:
+                # The sheet itself IS installed at this point, and the next run will sync it.
+                # So this is a delay, not a failure, and it says so.
+                self.events.put(
+                    (
+                        "catalogue",
+                        f"Sheet saved. Dashboard updates on the next run ({type(exc).__name__})",
+                        False,
+                    )
+                )
+
+        threading.Thread(target=work, daemon=True).start()
+
     def _drain(self) -> None:
         """Pump worker events onto the Tk thread. Tk is not thread-safe, so every widget
         update has to funnel through here."""
@@ -226,6 +267,11 @@ class App:
                 elif event[0] == "error":
                     self.subtitle.config(text=event[1][:70], fg=DANGER)
                     self._finish()
+                elif event[0] == "catalogue":
+                    # A run's own progress outranks this — the catalogue push is a background
+                    # courtesy, and it must not overwrite the line someone is watching.
+                    if not self.running:
+                        self.subtitle.config(text=event[1][:70], fg=ACCENT if event[2] else WARN)
         except queue.Empty:
             pass
         self.root.after(120, self._drain)
@@ -376,11 +422,14 @@ class App:
                     parent=window,
                 )
                 return
+            # Names, row order and which SKUs exist go to the dashboard straight away; the
+            # PRICES still need a scrape, which is the distinction the message draws.
+            self.push_catalogue(products)
             messagebox.showinfo(
                 "Spreadsheet updated",
                 f"{catalogue.summarise_catalogue(products)}\n\n"
-                "The next run — manual or automatic — will use these products, prices and "
-                "links.",
+                "The dashboard's product list and order update now. Prices follow on the next "
+                "run — manual or automatic.",
                 parent=window,
             )
             window.destroy()
@@ -395,6 +444,10 @@ class App:
             ):
                 return
             catalogue.revert_workbook()
+            # The built-in sheet is usually SMALLER, so this path removes products as well as
+            # renaming them. Pushing it immediately is what makes the board agree with the
+            # sheet that is actually in force from this moment on.
+            self.push_catalogue()
             window.destroy()
             self.refresh_status()
 

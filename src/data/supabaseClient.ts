@@ -59,9 +59,34 @@ export async function fetchDemo(): Promise<Omit<CachedPayload, 'fetchedAt'>> {
  * than by "second newest timestamp per cell", because cells within one run have slightly
  * different timestamps and a per-cell query would mix runs together.
  */
+const PRODUCT_COLS = 'sku,name,mrp,starred,target_sp,urls';
+
+/**
+ * The catalogue, in the spreadsheet's own row order.
+ *
+ * `position` was added to the schema after this dashboard shipped, and PostgREST answers a
+ * request for a column that does not exist with a 400 rather than by ignoring it. So a
+ * database that has not had the migration in supabase/schema.sql applied would show no prices
+ * at all — the retry below is what stops a pending migration from blanking the wall display.
+ * It costs one extra request only while the column is missing.
+ */
+async function fetchProducts(): Promise<ProductRow[]> {
+  try {
+    return await get<ProductRow[]>(
+      `products?select=${PRODUCT_COLS},position&order=position.asc.nullslast`,
+      'products',
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes('position')) throw err;
+    console.warn('[prices] products.position missing — run supabase/schema.sql to restore sheet order');
+    return get<ProductRow[]>(`products?select=${PRODUCT_COLS}`, 'products');
+  }
+}
+
 export async function fetchPrices(): Promise<Omit<CachedPayload, 'fetchedAt'>> {
   const [products, snapshots, runs] = await Promise.all([
-    get<ProductRow[]>('products?select=sku,name,mrp,starred,target_sp,urls', 'products'),
+    fetchProducts(),
     get<SnapshotRow[]>(
       'latest_prices?select=sku,marketplace,price,mrp,unit,status,via,note,checked_at',
       'latest_prices',

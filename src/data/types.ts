@@ -19,7 +19,23 @@ export const MARKETPLACE_LABELS: Record<Marketplace, string> = {
  * Only `ok` and `out_of_stock` can carry a number. Everything else renders as chrome, never as
  * a shaded cell: a blocked listing must never be mistakable for a cheap one.
  */
-export type CellStatus = 'ok' | 'not_listed' | 'out_of_stock' | 'blocked' | 'error';
+export type CellStatus =
+  | 'ok'
+  | 'not_listed'
+  | 'out_of_stock'
+  | 'blocked'
+  | 'error'
+  | /**
+     * CLIENT-SIDE ONLY — never written to the database, and deliberately absent from
+     * desktop/models.py and the schema's CHECK constraint.
+     *
+     * It means "this listing has a link but no reading yet", which became possible the moment
+     * the desktop app started pushing a swapped catalogue to Supabase ahead of the scrape that
+     * prices it. Those cells have a URL and no snapshot, and drawing them as `not_listed` told
+     * the operator "No Link Available" about a link they had just supplied — reading as though
+     * the upload had failed, minutes after it succeeded.
+     */
+    'pending';
 
 export interface Cell {
   marketplace: Marketplace;
@@ -40,6 +56,13 @@ export interface Row {
   sku: string;
   name: string;
   starred: boolean;
+  /**
+   * The product's row order in the spreadsheet — what the grid sorts on.
+   *
+   * Null for a SKU the current sheet no longer lists (and for every row on a database that
+   * predates the column). Those sort last; see HeatmapView.
+   */
+  position: number | null;
   /** The spreadsheet's MRP — what the pinned column shows. */
   mrp: number | null;
   cells: Record<Marketplace, Cell>;
@@ -48,10 +71,11 @@ export interface Row {
   /** In-stock listings on this row. Decides whether the row counts as listed at all. */
   liveCount: number;
   /**
-   * How many cells actually show a number — drives the row sort, so the grid fills from the top.
+   * How many cells actually show a number.
    *
-   * Deliberately NOT `liveCount`: an out-of-stock cell still prints its price, so sorting by
-   * live listings alone pushed visibly complete rows below rows with a blank in them.
+   * Deliberately NOT `liveCount`: an out-of-stock cell still prints its price. This used to
+   * drive the row sort, which is now the sheet's order (see HeatmapView) — it is kept because
+   * it is the honest measure of how complete a row looks on screen, and nothing else counts it.
    */
   pricedCount: number;
 }
@@ -77,6 +101,8 @@ export interface ProductRow {
   name: string;
   mrp: number | null;
   starred: boolean;
+  /** Absent on a database that has not had the `position` migration applied. */
+  position?: number | null;
   target_sp: Record<string, number> | null;
   urls: Record<string, string> | null;
 }
@@ -93,10 +119,16 @@ export interface SnapshotRow {
   checked_at: string;
 }
 
+/**
+ * The cell before any snapshot is laid over it.
+ *
+ * The URL decides which absence this is: no link in the sheet is `not_listed` and always will
+ * be, whereas a link with no reading yet is `pending` and will have a price after the next run.
+ */
 function emptyCell(marketplace: Marketplace, targetSp: number | null, url: string | null): Cell {
   return {
     marketplace,
-    status: 'not_listed',
+    status: url ? 'pending' : 'not_listed',
     price: null,
     mrp: null,
     unit: null,
@@ -105,6 +137,27 @@ function emptyCell(marketplace: Marketplace, targetSp: number | null, url: strin
     targetSp,
     previous: null,
   };
+}
+
+/**
+ * The products the CURRENT spreadsheet lists — everything the board should be counting.
+ *
+ * A withdrawn SKU is never deleted from the database: its price history is still worth having,
+ * and deleting the product row would cascade that history away. Instead the desktop app nulls
+ * its `position` on every sync, and it is dropped here.
+ *
+ * Without this, a sheet that loses a product keeps showing it on the wall FOREVER, holding its
+ * last-known price — the dashboard reads the latest snapshot per SKU, not the latest run, so a
+ * SKU that stopped being scraped simply freezes rather than disappearing. It was also still
+ * counted, which is why the header read 45 products against a 42-row sheet.
+ *
+ * The `some` guard is what keeps a database that has not had the `position` migration applied
+ * (every position null) from rendering an empty board. Losing the row order there is acceptable;
+ * losing every row is not.
+ */
+function catalogued(products: ProductRow[]): ProductRow[] {
+  const positioned = products.filter((p) => p.position != null);
+  return positioned.length ? positioned : products;
 }
 
 /**
@@ -134,7 +187,7 @@ export function buildPriceData(
   let checkedAt: number | null = null;
   const totals = { live: 0, listed: 0, errored: 0, blocked: 0, outOfStock: 0 };
 
-  const rows: Row[] = products.map((product) => {
+  const rows: Row[] = catalogued(products).map((product) => {
     const targetSp = product.target_sp ?? {};
     const urls = product.urls ?? {};
 
@@ -188,6 +241,7 @@ export function buildPriceData(
       sku: product.sku,
       name: product.name,
       starred: product.starred,
+      position: product.position ?? null,
       mrp: product.mrp,
       cells,
       minPrice,

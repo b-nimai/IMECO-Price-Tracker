@@ -61,16 +61,18 @@ def _fetch_one(
 
 
 def _fetch_blinkit(url: str, fetcher: Fetcher) -> Cell:
-    """Ask Blinkit for one listing, trying each city until one has it in stock.
+    """Ask Blinkit for one listing, trying each location until one has it in stock.
 
-    Blinkit answers per dark store, so "out of stock" from a single city means only that ONE
-    store is empty — which is not the question the board is asking. Walking Kolkata, then
-    Bengaluru, then Mumbai answers it properly: is this listing live anywhere, and at what price.
+    Blinkit answers per DARK STORE, so "out of stock" from a single point means only that ONE
+    store is empty — which is not the question the board is asking. Walking four Kolkata
+    neighbourhoods and then Bengaluru and Mumbai answers it properly: is this listing live
+    anywhere, and at what price. The Kolkata points matter as much as the other cities do; see
+    BLINKIT_LOCATIONS for the measurements that put them there.
 
-    Stops at the first city with stock, so anything available in Kolkata costs exactly one
-    request. Only genuinely unavailable listings pay for all three. If none has stock, the FIRST
-    city's answer is kept — the home market is the honest thing to report as unavailable, and it
-    carries the real price the item returns at.
+    Stops at the first location with stock, so anything the home store carries costs exactly one
+    request. Only genuinely unavailable listings pay for the full walk. If none has stock, the
+    FIRST location's answer is kept — the home store is the honest thing to report as
+    unavailable, and it carries the real price the item returns at.
     """
     first: Cell | None = None
 
@@ -89,7 +91,11 @@ def _fetch_blinkit(url: str, fetcher: Fetcher) -> Cell:
     # Only if the adapter had nothing more specific to say. "no store is carrying it" is a
     # better answer than "out of stock in three cities" and must not be overwritten by it.
     if first.status is Status.OUT_OF_STOCK and not first.note:
-        first.note = "out of stock in " + ", ".join(c for c, _ in BLINKIT_LOCATIONS)
+        # Deduplicated, order preserved: several of these points are different dark stores in
+        # the SAME city, and "out of stock in Kolkata, Kolkata, Kolkata, Kolkata, Bengaluru,
+        # Mumbai" reads as a bug in the app rather than a fact about the product.
+        cities = list(dict.fromkeys(c for c, _ in BLINKIT_LOCATIONS))
+        first.note = "out of stock in " + ", ".join(cities)
     return first
 
 
@@ -181,6 +187,10 @@ def write_fixture(path: Path, products: list[Product], results: list[tuple[str, 
                 "name": p.name,
                 "mrp": p.mrp,
                 "starred": p.starred,
+                # Carried so demo mode renders in the sheet's order too. The dashboard sorts on
+                # it and hides products without one, so a fixture missing this key would render
+                # alphabetically — a different board from the one it is supposed to stand in for.
+                "position": p.position,
                 "target_sp": p.target_sp,
                 "urls": p.urls,
             }

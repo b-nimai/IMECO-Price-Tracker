@@ -60,21 +60,62 @@ class Store:
     # ── catalogue ───────────────────────────────────────────────────────────────────────
 
     def sync_products(self, products: list[Product]) -> None:
-        """Mirror the spreadsheet into `products`. Upsert, so re-running is harmless."""
+        """Mirror the spreadsheet into `products`. Upsert, so re-running is harmless.
+
+        `position` carries the sheet's row order through to the dashboard, which sorts on it.
+        The column was added after this app shipped, so a database that has not had the
+        migration in supabase/schema.sql applied is still written to — without the ordering.
+        That degradation is deliberate: an un-migrated database should lose the row order, not
+        lose the entire scrape.
+        """
         rows = [
             {
                 "sku": p.sku,
                 "name": p.name,
                 "mrp": p.mrp,
                 "starred": p.starred,
+                "position": p.position,
                 "target_sp": p.target_sp,
                 "urls": p.urls,
                 "updated_at": "now()",
             }
             for p in products
         ]
-        for i in range(0, len(rows), CHUNK):
-            self._post("products", rows[i : i + CHUNK], upsert=True)
+
+        try:
+            for i in range(0, len(rows), CHUNK):
+                self._post("products", rows[i : i + CHUNK], upsert=True)
+        except RuntimeError as exc:
+            if "position" not in str(exc):
+                raise
+            for row in rows:
+                row.pop("position")
+            for i in range(0, len(rows), CHUNK):
+                self._post("products", rows[i : i + CHUNK], upsert=True)
+            return
+
+        self._demote_missing([p.sku for p in products])
+
+    def _demote_missing(self, skus: list[str]) -> None:
+        """Null the position of every product the sheet no longer lists.
+
+        Nothing is deleted — the snapshots of a withdrawn SKU are still history worth keeping,
+        and a delete would cascade them away. But a stale row must not keep a position it no
+        longer earns, or it would sit in the middle of the sheet's order forever. The dashboard
+        sorts nulls last, so these collect at the bottom of the board.
+        """
+        if not skus:
+            return
+        in_list = ",".join(f'"{s}"' for s in skus)
+        response = self._client.patch(
+            f"{self._base}/products",
+            params={"sku": f"not.in.({in_list})", "position": "not.is.null"},
+            json={"position": None},
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"products reorder failed [{response.status_code}]: {response.text[:300]}"
+            )
 
     # ── runs ────────────────────────────────────────────────────────────────────────────
 

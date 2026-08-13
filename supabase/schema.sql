@@ -15,10 +15,17 @@ create table if not exists products (
   name       text not null,
   mrp        numeric,
   starred    boolean not null default false,   -- the U+2605 marker in the sheet's SKU column
+  -- The product's row order in the workbook. The dashboard sorts on it, so the board reads in
+  -- the same order as the sheet. NULL means "the current sheet does not list this SKU any
+  -- more" — those rows are kept for their price history and sorted last.
+  position   integer,
   target_sp  jsonb  not null default '{}'::jsonb,  -- {"amazon":299,"myntra":259}
   urls       jsonb  not null default '{}'::jsonb,  -- {"amazon":"https://...", ...}
   updated_at timestamptz not null default now()
 );
+
+-- MIGRATION for databases created before `position` existed. Harmless on a fresh one.
+alter table products add column if not exists position integer;
 
 -- One row per execution of the desktop app.
 create table if not exists runs (

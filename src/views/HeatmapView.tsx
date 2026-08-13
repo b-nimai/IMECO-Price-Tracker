@@ -11,16 +11,24 @@ interface Props {
 
 export function HeatmapView({ rows, showUnlisted }: Props) {
   const visible = useMemo(() => {
-    // Most prices first, so the grid fills from the top and the gaps collect at the bottom.
-    // `pricedCount` counts every cell that shows a number, which is what someone reading the
-    // board actually sees; `liveCount` breaks the tie so an in-stock row outranks an equally
-    // full one that cannot be bought.
-    const sorted = [...rows].sort(
-      (a, b) =>
-        b.pricedCount - a.pricedCount ||
-        b.liveCount - a.liveCount ||
-        a.name.localeCompare(b.name),
-    );
+    // THE SHEET'S OWN ORDER, top to bottom. The board and `Docs/pricing link.xlsx` are read
+    // side by side, and a row has to be findable by looking where it sits in the workbook.
+    //
+    // This replaced a most-prices-first ranking. That filled the grid from the top and pushed
+    // the gaps to the bottom, which looked tidier — but it meant every row moved whenever a
+    // scrape lost or gained a price, so nothing was ever twice in the same place.
+    //
+    // A null position is a SKU the current sheet does not list (or a database still missing
+    // the `position` column). Those have no place in the sheet's order, so they collect at the
+    // bottom in name order.
+    const sorted = [...rows].sort((a, b) => {
+      if (a.position == null || b.position == null) {
+        if (a.position != null) return -1;
+        if (b.position != null) return 1;
+        return a.name.localeCompare(b.name);
+      }
+      return a.position - b.position;
+    });
     return showUnlisted ? sorted : sorted.filter((r) => r.liveCount > 0);
   }, [rows, showUnlisted]);
 

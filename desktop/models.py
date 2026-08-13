@@ -87,6 +87,12 @@ class Product:
     starred: bool
     """The U+2605 prefix on 24 of the 32 SKUs in column A. Preserved as data rather than
     discarded, since it appears to mark best-sellers."""
+    position: int = 0
+    """This product's row order in the spreadsheet, counting only parsed rows.
+
+    The dashboard sorts on it, so the board reads top-to-bottom in the same order as the sheet
+    the operator maintains. That is the whole reason it is carried: without it the grid imposed
+    its own ordering and no row could be found by looking where it sits in the workbook."""
     urls: dict[str, str] = field(default_factory=dict)
     target_sp: dict[str, float] = field(default_factory=dict)
     """Intended selling price per marketplace, from the sheet. The `drift` colour metric is

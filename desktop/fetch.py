@@ -70,13 +70,34 @@ HEADERS = {
 # board is really being asked: is this listing live and at what price. Kolkata is first because
 # it is the home market, so its price wins whenever it has stock.
 #
-# The search STOPS at the first city with stock, so a listing that is in stock in Kolkata costs
-# exactly one request — same as before. Only genuinely-unavailable listings pay for all three,
-# and `Cell.note` records which city answered so a price from Mumbai is never mistaken for a
+# The search STOPS at the first point with stock, so a listing that is in stock at the home
+# store costs exactly one request. Only genuinely-unavailable listings pay for the whole walk,
+# and `Cell.note` records which CITY answered so a price from Mumbai is never mistaken for a
 # local one.
+#
+# WHY FOUR POINTS INSIDE KOLKATA, and not one: Blinkit answers per DARK STORE, not per city, and
+# the stores do not carry the same catalogue. The single Kolkata point used until now (Salt Lake,
+# 22.5726/88.4310) sat on one of the thinner ones, and the board carried its gaps as fact.
+#
+# Measured against every Blinkit listing that was not live from that point:
+#   IMEGHFTB100-PP1   Salt Lake: no store carries it   Dum Dum: IN STOCK ₹99    Behala: ₹99
+#   IMEFTCNP2_600     Salt Lake: out of stock          Dum Dum: IN STOCK ₹189   Behala: ₹189
+#   IMEFTCNP600       Salt Lake: out of stock          Dum Dum: IN STOCK ₹189   Behala: ₹189
+#   IMEBPB1           out of stock everywhere in Kolkata — a real absence, correctly reported
+#
+# Three of four "out of stock in Kolkata" cells were an artefact of WHERE we stood. Dum Dum
+# leads because it recovered every one of them and is the operator's own location, so the board
+# now agrees with what they see in their own browser.
+#
+# The city labels are deliberately all "Kolkata": which dark store answered is our business, not
+# the board's, and `run.py` only annotates a price when the CITY differs from home.
 BLINKIT_LOCATIONS: tuple[tuple[str, dict[str, str]], ...] = (
-    ("Kolkata", {"lat": os.environ.get("BLINKIT_LAT", "22.5726"),
-                 "lon": os.environ.get("BLINKIT_LON", "88.4310")}),
+    # Home. Overridable by env for anyone running this from another neighbourhood.
+    ("Kolkata", {"lat": os.environ.get("BLINKIT_LAT", "22.6420"),
+                 "lon": os.environ.get("BLINKIT_LON", "88.4212")}),   # Dum Dum
+    ("Kolkata", {"lat": "22.5250", "lon": "88.3650"}),                # Ballygunge
+    ("Kolkata", {"lat": "22.4986", "lon": "88.3140"}),                # Behala
+    ("Kolkata", {"lat": "22.5726", "lon": "88.4310"}),                # Salt Lake
     ("Bengaluru", {"lat": "12.9716", "lon": "77.5946"}),
     ("Mumbai", {"lat": "19.0760", "lon": "72.8777"}),
 )

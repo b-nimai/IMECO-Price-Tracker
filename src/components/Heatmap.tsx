@@ -11,6 +11,7 @@ import {
 import { formatAmount, formatPrice } from '@/data/format';
 import { MARKETPLACES, MARKETPLACE_LABELS, type Cell, type Row } from '@/data/types';
 import { useGridFit } from '@/hooks/useGridFit';
+import { useNameWidth } from '@/hooks/useNameWidth';
 import { cn } from '@/lib/utils';
 
 /**
@@ -39,14 +40,20 @@ const PLATE: CSSProperties = {
  * Below `lg` both collapse to fixed widths — on a phone a proportional name column would leave
  * no room at all for the data, so names fall back to `truncate` + tooltip.
  *
- * The multiples (25x / 6x) and the fixed fallbacks match marketplace-dispatch-dashboard's grid
- * exactly, so the two boards read as one system on the same wall.
+ * MRP is a type multiple, 5.4x — it holds "₹597" and never anything longer, so its width is a
+ * property of the type rather than of the data. It was 6x; the trim goes to the names.
+ *
+ * The NAME column is not a multiple at all. It is measured from the longest name actually on
+ * the board (`useNameWidth`) and set to exactly that, because any fixed multiple is wrong in
+ * one of two directions: 25x cut "Good Habbit 100 Pulls Facial Tissue Box Assorted - Pack of 2"
+ * off mid-word, and 34x fit it with ~100px of dead space left over beside every shorter row.
+ * Both are paid for out of the price columns, which under `table-fixed` split whatever is left.
  */
 const NAME_W =
-  'w-[10rem] min-w-[10rem] max-w-[10rem] lg:w-[var(--name-w)] lg:min-w-[var(--name-w)] lg:max-w-[var(--name-w)]';
-const MRP_W = 'w-[5.5rem] min-w-[5.5rem] lg:w-[var(--mrp-w)] lg:min-w-[var(--mrp-w)]';
+  'w-[12rem] min-w-[12rem] max-w-[12rem] lg:w-[var(--name-w)] lg:min-w-[var(--name-w)] lg:max-w-[var(--name-w)]';
+const MRP_W = 'w-[5rem] min-w-[5rem] lg:w-[var(--mrp-w)] lg:min-w-[var(--mrp-w)]';
 /** Sticky offset for MRP = the name column plus one border-spacing step. */
-const MRP_LEFT = 'left-[10.25rem] lg:left-[calc(var(--name-w)+2px)]';
+const MRP_LEFT = 'left-[12.25rem] lg:left-[calc(var(--name-w)+2px)]';
 
 /**
  * Every type size is a multiple of `--grid-font`, the px value `useGridFit` measures for the
@@ -73,6 +80,15 @@ const SUB_TEXT = 'text-[length:calc(var(--grid-font)*0.62)] leading-[1.1]';
  * screen. 1.05 x 1.1 lands back on 1.155, so the row band is unchanged.
  */
 const MRP_TEXT = 'text-[length:calc(var(--grid-font)*1.05)] leading-[1.1]';
+/**
+ * The product name, set a touch smaller than the prices so the longest names fit their column
+ * whole rather than truncating.
+ *
+ * 0.92 x 1.25 = 1.15, which is CELL_TEXT's line box exactly — so this buys the extra characters
+ * without changing the row height gridFit.ts solved for. Change the two together or the fit
+ * silently drifts.
+ */
+const NAME_TEXT = 'text-[length:calc(var(--grid-font)*0.92)] leading-[1.25] tracking-[-0.01em]';
 const HEAD_TEXT = 'text-[length:calc(var(--grid-font)*0.9)]';
 const SUMMARY_TEXT = 'text-[length:calc(var(--grid-font)*1.1)] leading-[1.15]';
 const HEAD_H = 'h-[calc(var(--grid-font)*2)]';
@@ -97,6 +113,12 @@ function cellChrome(cell: Cell) {
       // maintains the spreadsheet, and a bare dot never once read as one. It sits in the SUB
       // slot so it stays subordinate to the prices around it — a note, not a value.
       return { ...base, className: 'text-muted-foreground', text: '', sub: 'No Link Available' };
+
+    case 'pending':
+      // A product added to the sheet minutes ago, whose first scrape has not run yet. Says so,
+      // rather than borrowing "No Link Available" (there IS a link) or the em dash this board
+      // uses for a listing that has no price.
+      return { ...base, className: 'text-muted-foreground', text: '', sub: 'Awaiting first check' };
 
     case 'blocked':
       // Hatched, so "we could not look" stays distinguishable from "there is nothing here to
@@ -137,6 +159,8 @@ function tooltip(cell: Cell, row: Row): string {
   switch (cell.status) {
     case 'not_listed':
       return `${head}: not listed — no link in the spreadsheet`;
+    case 'pending':
+      return `${head}: in the spreadsheet, not yet checked — the next run will price it`;
     case 'blocked':
       return `${head}: could not be checked${cell.note ? ` — ${cell.note}` : ''}`;
     case 'error':
@@ -158,6 +182,13 @@ export function Heatmap({ rows }: Props) {
   // The type is sized to the box, not fixed: with every product on screen and nobody at the TV
   // to scroll, the grid has to be as large as it can be while still fitting.
   const [fitRef, fontPx] = useGridFit(rows.length);
+  // ...and the name column to the longest name in it, so the column is exactly as wide as it
+  // has to be and every pixel it does not need goes to the prices.
+  const nameW = useNameWidth(
+    fitRef,
+    rows.map((r) => r.name),
+    fontPx,
+  );
 
   return (
     // The height has to land on the table's own container — that div carries `overflow-x-auto`,
@@ -168,8 +199,8 @@ export function Heatmap({ rows }: Props) {
       style={
         {
           '--grid-font': `${fontPx}px`,
-          '--name-w': `min(${fontPx * 25}px, 26vw)`,
-          '--mrp-w': `min(${fontPx * 6}px, 7vw)`,
+          '--name-w': `${nameW}px`,
+          '--mrp-w': `min(${fontPx * 5.4}px, 6vw)`,
         } as CSSProperties
       }
     >
@@ -261,7 +292,7 @@ export function Heatmap({ rows }: Props) {
                 <TableCell
                   className={cn(
                     'sticky left-0 z-10 truncate bg-card py-1 font-semibold text-foreground',
-                    CELL_TEXT,
+                    NAME_TEXT,
                     NAME_W,
                   )}
                   title={`${row.name} · ${row.sku}`}
