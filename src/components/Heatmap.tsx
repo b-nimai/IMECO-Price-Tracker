@@ -141,10 +141,12 @@ function cellChrome(cell: Cell) {
     case 'out_of_stock':
       // Drawn exactly like a live price, by request. The price is still true — it is what the
       // item costs when stock returns — and the grid is now read as a price table rather than
-      // an availability board. An em dash stands in where there is no price at all (an Amazon
-      // listing with no buybox). The tooltip still says OUT OF STOCK, which is the only place
-      // that fact survives on screen.
-      return { ...base, text: cell.price != null ? formatPrice(cell.price) : '—' };
+      // an availability board. Where there is no price at all (an Amazon listing with no
+      // buybox, a Flipkart "Notify Me" page) it says so in the SUB slot, like "No Link
+      // Available", rather than an em dash that read as missing data.
+      return cell.price != null
+        ? { ...base, text: formatPrice(cell.price) }
+        : { ...base, className: 'text-muted-foreground', text: '', sub: 'Out of Stock' };
 
     default:
       return cell.price != null
