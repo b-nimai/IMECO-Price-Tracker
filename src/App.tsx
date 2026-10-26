@@ -13,14 +13,16 @@ import { HeatmapView } from '@/views/HeatmapView';
 const TrendsView = lazy(() => import('@/views/TrendsView'));
 const AvailabilityView = lazy(() => import('@/views/AvailabilityView'));
 const ReviewsView = lazy(() => import('@/views/ReviewsView'));
+const CompetitorsView = lazy(() => import('@/views/CompetitorsView'));
 
-const TABS = ['prices', 'trends', 'availability', 'reviews'] as const;
+const TABS = ['prices', 'trends', 'availability', 'reviews', 'competitors'] as const;
 type Tab = (typeof TABS)[number];
 const TAB_LABELS: Record<Tab, string> = {
   prices: 'Prices',
   trends: 'Trends',
   availability: 'Availability',
   reviews: 'Reviews',
+  competitors: 'Competitors',
 };
 
 /**
@@ -97,6 +99,9 @@ export function App() {
             {tab === 'trends' && <TrendsView rows={data.rows} />}
             {tab === 'availability' && <AvailabilityView rows={data.rows} />}
             {tab === 'reviews' && <ReviewsView rows={data.rows} />}
+            {tab === 'competitors' && (
+              <CompetitorsView rows={data.rows} competitors={data.competitors} />
+            )}
           </Suspense>
         </main>
       )}

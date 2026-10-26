@@ -48,7 +48,11 @@ function niceTicks(lo: number, hi: number): number[] {
 
 const DAY = 86_400_000;
 const dayLabel = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
-const hourLabel = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', hour: 'numeric' });
+const hourLabel = new Intl.DateTimeFormat('en-IN', {
+  day: 'numeric',
+  month: 'short',
+  hour: 'numeric',
+});
 const stampLabel = new Intl.DateTimeFormat('en-IN', {
   day: 'numeric',
   month: 'short',
@@ -208,7 +212,17 @@ export function PriceChart({ series, from, to }: Props) {
     }
     const anyDashed = paths.some((p) => p.dashed);
 
-    return { x, y, paths, yTicks: niceTicks(lo, hi), xTicks, tickLabel, start, endLabels, anyDashed };
+    return {
+      x,
+      y,
+      paths,
+      yTicks: niceTicks(lo, hi),
+      xTicks,
+      tickLabel,
+      start,
+      endLabels,
+      anyDashed,
+    };
   }, [series, from, to, plotW]);
 
   function onMove(e: PointerEvent<SVGRectElement>) {
@@ -366,9 +380,7 @@ export function PriceChart({ series, from, to }: Props) {
                         y={top}
                         width={Math.max(1, x2 - x1)}
                         height={RIBBON_H}
-                        className={
-                          p.status === 'ok' ? 'fill-foreground/25' : 'fill-destructive'
-                        }
+                        className={p.status === 'ok' ? 'fill-foreground/25' : 'fill-destructive'}
                       />
                     );
                   })}
@@ -437,15 +449,20 @@ export function PriceChart({ series, from, to }: Props) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-16 text-xs text-muted-foreground">
         <span>Bars under the chart show stock:</span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-4 rounded-sm bg-foreground/25" aria-hidden /> in stock
+          <span className="inline-block h-2.5 w-4 rounded-sm bg-foreground/25" aria-hidden /> in
+          stock
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-4 rounded-sm bg-destructive" aria-hidden /> out of stock
+          <span className="inline-block h-2.5 w-4 rounded-sm bg-destructive" aria-hidden /> out of
+          stock
         </span>
         <span>gap = no reading</span>
         {geometry?.anyDashed && (
           <span className="flex items-center gap-1.5">
-            <span className="inline-block w-4 border-t-2 border-dashed border-muted-foreground" aria-hidden />
+            <span
+              className="inline-block w-4 border-t-2 border-dashed border-muted-foreground"
+              aria-hidden
+            />
             dashed line = price while out of stock
           </span>
         )}

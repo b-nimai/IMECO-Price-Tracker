@@ -26,7 +26,8 @@ export function useHashTab<T extends string>(
     (next: T) => {
       // replaceState rather than assigning location.hash: switching tabs should not pile up
       // history entries, and assigning the hash would also jump-scroll to a matching id.
-      const url = next === fallback ? window.location.pathname + window.location.search : `#${next}`;
+      const url =
+        next === fallback ? window.location.pathname + window.location.search : `#${next}`;
       window.history.replaceState(null, '', url);
       setTab(next);
     },

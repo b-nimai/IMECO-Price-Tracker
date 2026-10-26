@@ -67,6 +67,10 @@ export interface Cell {
 export interface Row {
   sku: string;
   name: string;
+  /** "IMECO" for our own products; the brand typed on the Competitors sheet otherwise. */
+  brand: string;
+  /** For a competitor, the IMECO SKU it is compared against. Null for IMECO's own rows. */
+  competitorOf: string | null;
   starred: boolean;
   /**
    * The product's row order in the spreadsheet — what the grid sorts on.
@@ -93,7 +97,10 @@ export interface Row {
 }
 
 export interface PriceData {
+  /** IMECO's own products — everything the board, its counts and the other tabs list. */
   rows: Row[];
+  /** Products from the workbook's Competitors sheet. Only the Competitors tab shows these. */
+  competitors: Row[];
   /** When the newest snapshot was taken, not when we fetched it. */
   checkedAt: number | null;
   lastRunSource: 'manual' | 'scheduled' | null;
@@ -117,6 +124,18 @@ export interface ProductRow {
   position?: number | null;
   target_sp: Record<string, number> | null;
   urls: Record<string, string> | null;
+  /** Absent on a database without the competitor migration — every row is then IMECO's. */
+  brand?: string | null;
+  competitor_of?: string | null;
+}
+
+/**
+ * A competitor row. `competitor_of` is the defining column; the brand check is the backstop
+ * for a competitor whose IMECO product was deleted (the foreign key nulls `competitor_of`), so
+ * it still cannot reach the wall as one of ours.
+ */
+export function isCompetitor(p: ProductRow): boolean {
+  return p.competitor_of != null || (p.brand != null && p.brand !== 'IMECO');
 }
 
 export interface SnapshotRow {
@@ -222,7 +241,10 @@ export function buildPriceData(
   let checkedAt: number | null = null;
   const totals = { live: 0, listed: 0, errored: 0, blocked: 0, outOfStock: 0 };
 
-  const rows: Row[] = catalogued(products).map((product) => {
+  const all: Row[] = catalogued(products).map((product) => {
+    // Competitors are joined to their snapshots like any product, but they are not ours: they
+    // stay out of the header's counts and the board's freshness, which describe IMECO.
+    const rival = isCompetitor(product);
     const targetSp = product.target_sp ?? {};
     const urls = product.urls ?? {};
 
@@ -235,7 +257,7 @@ export function buildPriceData(
       if (!MARKETPLACES.includes(marketplace)) continue;
 
       const timestamp = Date.parse(snapshot.checked_at);
-      if (!Number.isNaN(timestamp) && (checkedAt === null || timestamp > checkedAt)) {
+      if (!rival && !Number.isNaN(timestamp) && (checkedAt === null || timestamp > checkedAt)) {
         checkedAt = timestamp;
       }
 
@@ -251,6 +273,7 @@ export function buildPriceData(
         previous: previousIndex.get(`${product.sku}:${marketplace}`) ?? null,
       };
 
+      if (rival) continue;
       if (snapshot.status !== 'not_listed') totals.listed += 1;
       if (snapshot.status === 'ok') totals.live += 1;
       if (snapshot.status === 'error') totals.errored += 1;
@@ -275,6 +298,8 @@ export function buildPriceData(
     return {
       sku: product.sku,
       name: product.name,
+      brand: rival ? (product.brand ?? 'Unknown brand') : 'IMECO',
+      competitorOf: rival ? (product.competitor_of ?? null) : null,
       starred: product.starred,
       position: product.position ?? null,
       mrp: product.mrp,
@@ -285,5 +310,11 @@ export function buildPriceData(
     };
   });
 
-  return { rows, checkedAt, lastRunSource: null, totals };
+  return {
+    rows: all.filter((r) => r.brand === 'IMECO' && r.competitorOf === null),
+    competitors: all.filter((r) => r.brand !== 'IMECO' || r.competitorOf !== null),
+    checkedAt,
+    lastRunSource: null,
+    totals,
+  };
 }

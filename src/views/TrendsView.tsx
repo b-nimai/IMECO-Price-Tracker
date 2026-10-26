@@ -14,7 +14,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatPct, formatPrice } from '@/data/format';
-import { CONFIGURED, fetchHistory, fetchPriceStats, type PriceStatsRow } from '@/data/supabaseClient';
+import {
+  CONFIGURED,
+  fetchHistory,
+  fetchPriceStats,
+  type PriceStatsRow,
+} from '@/data/supabaseClient';
 import { isMissingView, useRemote } from '@/hooks/useRemote';
 import {
   MARKETPLACE_COLORS,
@@ -183,7 +188,13 @@ function SpreadNow({ row }: { row: Row }) {
 }
 
 /** Lowest and highest price ever recorded for a product, across every marketplace. */
-function AllTime({ row, stats }: { row: Row; stats: Map<string, PriceStatsRow> | null | undefined }) {
+function AllTime({
+  row,
+  stats,
+}: {
+  row: Row;
+  stats: Map<string, PriceStatsRow> | null | undefined;
+}) {
   const lows = MARKETPLACES.map((m) => stats?.get(`${row.sku}:${m}`)?.min_ever).filter(
     (v): v is number => v != null,
   );
@@ -222,7 +233,9 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
     () =>
       statsRemote && {
         error: statsRemote.error,
-        data: statsRemote.data && new Map(statsRemote.data.map((r) => [`${r.sku}:${r.marketplace}`, r])),
+        data:
+          statsRemote.data &&
+          new Map(statsRemote.data.map((r) => [`${r.sku}:${r.marketplace}`, r])),
       },
     [statsRemote],
   );
@@ -245,8 +258,8 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
     return (
       <Card className="card-glass">
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Trends read the price history in the live database, and this dashboard is running on
-          demo data.
+          Trends read the price history in the live database, and this dashboard is running on demo
+          data.
         </CardContent>
       </Card>
     );
@@ -388,7 +401,10 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
               })}
               {visible.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={MARKETPLACES.length + 3} className="py-8 text-center text-muted-foreground">
+                  <TableCell
+                    colSpan={MARKETPLACES.length + 3}
+                    className="py-8 text-center text-muted-foreground"
+                  >
                     No product matches "{filter}".
                   </TableCell>
                 </TableRow>

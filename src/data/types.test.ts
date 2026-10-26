@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { buildPriceData, type ProductRow, type SnapshotRow } from './types';
 
-function product(sku: string, position: number | null, urls: Record<string, string> = {}): ProductRow {
+function product(
+  sku: string,
+  position: number | null,
+  urls: Record<string, string> = {},
+): ProductRow {
   return { sku, name: sku, mrp: 100, starred: false, position, target_sp: null, urls };
 }
 
@@ -55,5 +59,30 @@ describe('buildPriceData', () => {
     );
     expect(data.rows[0].cells.amazon.status).toBe('ok');
     expect(data.rows[0].cells.amazon.price).toBe(250);
+  });
+
+  it('keeps competitors off the board and out of its counts', () => {
+    const rival: ProductRow = {
+      ...product('C:amazon:B0RIVAL001', 1),
+      brand: 'Origami',
+      competitor_of: 'OURS',
+    };
+    const data = buildPriceData(
+      [{ ...product('OURS', 0), brand: 'IMECO', competitor_of: null }, rival],
+      [snapshot('OURS', 'amazon', 200), snapshot('C:amazon:B0RIVAL001', 'amazon', 150)],
+    );
+    expect(data.rows.map((r) => r.sku)).toEqual(['OURS']);
+    expect(data.competitors.map((r) => [r.sku, r.brand, r.competitorOf])).toEqual([
+      ['C:amazon:B0RIVAL001', 'Origami', 'OURS'],
+    ]);
+    expect(data.competitors[0].cells.amazon.price).toBe(150);
+    expect(data.totals.live).toBe(1);
+  });
+
+  it('still treats a competitor as one when its IMECO product is gone', () => {
+    // competitor_of is nulled by the foreign key when the IMECO row is deleted; brand still says.
+    const orphan: ProductRow = { ...product('C:x', 1), brand: 'Origami', competitor_of: null };
+    const data = buildPriceData([product('OURS', 0), orphan], []);
+    expect(data.rows.map((r) => r.sku)).toEqual(['OURS']);
   });
 });

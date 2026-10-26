@@ -121,8 +121,7 @@ export default function ReviewsView({ rows }: { rows: Row[] }) {
     return (
       <Card className="card-glass">
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Reviews read the ratings in the live database, and this dashboard is running on demo
-          data.
+          Reviews read the ratings in the live database, and this dashboard is running on demo data.
         </CardContent>
       </Card>
     );

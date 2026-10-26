@@ -6,7 +6,13 @@ import { Search } from 'lucide-react';
 import { MARKETPLACE_COLORS, MARKETPLACE_LABELS, type Marketplace } from '@/data/types';
 
 /** Marketplace name with its series dot — the same colour it has in every chart. */
-export function Where({ marketplace, className }: { marketplace: Marketplace; className?: string }) {
+export function Where({
+  marketplace,
+  className,
+}: {
+  marketplace: Marketplace;
+  className?: string;
+}) {
   return (
     <span className={className ?? 'inline-flex items-center gap-1 text-xs text-muted-foreground'}>
       <span
@@ -19,7 +25,13 @@ export function Where({ marketplace, className }: { marketplace: Marketplace; cl
   );
 }
 
-export function FilterBox({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+export function FilterBox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
   return (
     <label className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5">
       <Search className="size-4 text-muted-foreground" aria-hidden />
@@ -39,8 +51,8 @@ export function FilterBox({ value, onChange }: { value: string; onChange: (next:
 export function SchemaNote({ view }: { view: string }) {
   return (
     <p className="mt-1 text-xs text-amber-400">
-      This needs the <code>{view}</code> view — run <code>supabase/schema.sql</code> in the
-      Supabase SQL editor.
+      This needs the <code>{view}</code> view — run <code>supabase/schema.sql</code> in the Supabase
+      SQL editor.
     </p>
   );
 }

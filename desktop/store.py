@@ -61,14 +61,20 @@ class Store:
 
     # ── catalogue ───────────────────────────────────────────────────────────────────────
 
-    def sync_products(self, products: list[Product]) -> None:
+    def sync_products(self, products: list[Product]) -> set[str]:
         """Mirror the spreadsheet into `products`. Upsert, so re-running is harmless.
 
-        `position` carries the sheet's row order through to the dashboard, which sorts on it.
-        The column was added after this app shipped, so a database that has not had the
-        migration in supabase/schema.sql applied is still written to — without the ordering.
-        That degradation is deliberate: an un-migrated database should lose the row order, not
-        lose the entire scrape.
+        `position` carries the sheet's row order through to the dashboard, which sorts on it;
+        `brand` / `competitor_of` mark the rows from the Competitors sheet. All three were added
+        after this app shipped, so a database that has not had the migration in
+        supabase/schema.sql applied is still written to — without the ordering, and WITHOUT the
+        competitors at all: a competitor written to a table that cannot say it is one would land
+        on the wall display as an IMECO product. An un-migrated database should lose features,
+        not the scrape, and never gain a wrong row.
+
+        Returns the SKUs actually stored, so the caller writes snapshots only for those — a
+        snapshot for a product that is not in the table would fail the whole run on its
+        foreign key.
         """
         rows = [
             {
@@ -79,24 +85,40 @@ class Store:
                 "position": p.position,
                 "target_sp": p.target_sp,
                 "urls": p.urls,
+                "brand": p.brand,
+                "competitor_of": p.competitor_of,
                 "updated_at": "now()",
             }
             for p in products
         ]
 
-        try:
-            for i in range(0, len(rows), CHUNK):
-                self._post("products", rows[i : i + CHUNK], upsert=True)
-        except RuntimeError as exc:
-            if "position" not in str(exc):
-                raise
-            for row in rows:
-                row.pop("position")
-            for i in range(0, len(rows), CHUNK):
-                self._post("products", rows[i : i + CHUNK], upsert=True)
-            return
+        degraded = False
+        for _ in range(3):  # at most: drop competitors, then drop position
+            try:
+                for i in range(0, len(rows), CHUNK):
+                    self._post("products", rows[i : i + CHUNK], upsert=True)
+                break
+            except RuntimeError as exc:
+                message = str(exc)
+                if ("brand" in message or "competitor_of" in message) and "brand" in rows[0]:
+                    rows = [
+                        {k: v for k, v in r.items() if k not in ("brand", "competitor_of")}
+                        for r in rows
+                        if r["competitor_of"] is None
+                    ]
+                elif "position" in message and "position" in rows[0]:
+                    for row in rows:
+                        row.pop("position")
+                    degraded = True
+                else:
+                    raise
+        else:
+            raise RuntimeError("products write failed after dropping unmigrated columns")
 
-        self._demote_missing([p.sku for p in products])
+        stored = {r["sku"] for r in rows}
+        if not degraded:
+            self._demote_missing(sorted(stored))
+        return stored
 
     def _demote_missing(self, skus: list[str]) -> None:
         """Null the position of every product the sheet no longer lists.

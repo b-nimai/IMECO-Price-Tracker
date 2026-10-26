@@ -118,6 +118,12 @@ class Product:
     target_sp: dict[str, float] = field(default_factory=dict)
     """Intended selling price per marketplace, from the sheet. The `drift` colour metric is
     measured against this, so a marketplace missing here simply cannot be drift-shaded."""
+    brand: str = "IMECO"
+    """Whose product this is. Everything on the IMECO sheet is IMECO's; rows from the
+    "Competitors" sheet carry the brand typed there."""
+    competitor_of: str | None = None
+    """For a competitor: the IMECO SKU it is compared against. None for IMECO's own products —
+    which is how the dashboard keeps competitors off the wall display."""
 
     def url_for(self, marketplace: str) -> str | None:
         return self.urls.get(marketplace)

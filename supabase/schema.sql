@@ -27,6 +27,15 @@ create table if not exists products (
 -- MIGRATION for databases created before `position` existed. Harmless on a fresh one.
 alter table products add column if not exists position integer;
 
+-- MIGRATION: competitors, from the workbook's optional "Competitors" sheet. Their rows live in
+-- this same table so the scraper, snapshots and every view treat them like any listing; these
+-- two columns are what keep them OFF the wall display. `competitor_of` is the IMECO SKU a row
+-- is compared against, NULL for IMECO's own products.
+alter table products add column if not exists brand text not null default 'IMECO';
+alter table products add column if not exists competitor_of text
+  references products(sku) on delete set null;
+create index if not exists products_competitor_of_idx on products (competitor_of);
+
 -- One row per execution of the desktop app.
 create table if not exists runs (
   id            uuid primary key default gen_random_uuid(),

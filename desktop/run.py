@@ -285,7 +285,11 @@ def store_results(
 
     warning = None
     with Store(settings) as store:
-        store.sync_products(products)
+        stored = store.sync_products(products)
+        if len(stored) < len(products):
+            warning = "competitors not stored — run supabase/schema.sql to add them"
+            results = [(sku, cell) for sku, cell in results if sku in stored]
+            checks = [c for c in checks or [] if c.sku in stored]
         run_id = store.start_run(source)
         written = store.save_snapshots(run_id, results)
         if checks:
@@ -356,8 +360,10 @@ def main(argv: list[str] | None = None) -> int:
 
     run_id, written, warning = store_results(settings, products, results, checks, args.source)
     print(f"\nstored {written} snapshots (run {run_id})")
-    if checks:
-        print(f"stored {len(checks)} dark-store checks" if not warning else f"  ! {warning}")
+    if checks and not warning:
+        print(f"stored {len(checks)} dark-store checks")
+    if warning:
+        print(f"  ! {warning}")
     return 0
 
 

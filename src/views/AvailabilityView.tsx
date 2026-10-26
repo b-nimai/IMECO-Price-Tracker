@@ -73,13 +73,7 @@ function AvailabilityCell({ row, stats }: { row: Row; stats: AvailabilityRow | u
 }
 
 /** In stock share across every listing on one marketplace, last 7 days. */
-function Scorecard({
-  label,
-  rows,
-}: {
-  label: string;
-  rows: AvailabilityRow[];
-}) {
+function Scorecard({ label, rows }: { label: string; rows: AvailabilityRow[] }) {
   const checks = rows.reduce((n, r) => n + r.checks_7d, 0);
   const inStock = rows.reduce((n, r) => n + r.in_stock_7d, 0);
   const now = rows.filter((r) => r.status_now === 'ok').length;
@@ -111,9 +105,9 @@ function StoreGrid({ products, stores }: { products: Row[]; stores: StoreRow[] }
   return (
     <>
       <p className="mb-3 text-xs text-muted-foreground">
-        Blinkit stock is per dark store, so the same product can be in stock in one
-        neighbourhood and not the next. The desktop app asks every store every 3 hours; last
-        asked {since.format(lastWalk)}.
+        Blinkit stock is per dark store, so the same product can be in stock in one neighbourhood
+        and not the next. The desktop app asks every store every 3 hours; last asked{' '}
+        {since.format(lastWalk)}.
       </p>
       <Table>
         <TableHeader>
@@ -137,7 +131,9 @@ function StoreGrid({ products, stores }: { products: Row[]; stores: StoreRow[] }
         <TableBody>
           {products.map((row) => {
             const cells = areas.map((a) => byKey.get(`${row.sku}:${a}`));
-            const answered = cells.filter((c) => c && (c.status_now === 'ok' || c.status_now === 'out_of_stock'));
+            const answered = cells.filter(
+              (c) => c && (c.status_now === 'ok' || c.status_now === 'out_of_stock'),
+            );
             const live = cells.filter((c) => c?.status_now === 'ok').length;
             return (
               <TableRow key={row.sku}>
@@ -216,7 +212,11 @@ export default function AvailabilityView({ rows }: { rows: Row[] }) {
   }, [ordered, filter, sort, stats]);
 
   const blinkitProducts = useMemo(
-    () => byName(ordered.filter((r) => r.cells.blinkit.url), filter),
+    () =>
+      byName(
+        ordered.filter((r) => r.cells.blinkit.url),
+        filter,
+      ),
     [ordered, filter],
   );
 
@@ -224,8 +224,8 @@ export default function AvailabilityView({ rows }: { rows: Row[] }) {
     return (
       <Card className="card-glass">
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Availability reads the stock history in the live database, and this dashboard is
-          running on demo data.
+          Availability reads the stock history in the live database, and this dashboard is running
+          on demo data.
         </CardContent>
       </Card>
     );
@@ -317,7 +317,9 @@ export default function AvailabilityView({ rows }: { rows: Row[] }) {
           <CardTitle className="text-sm tracking-widest text-muted-foreground uppercase">
             Blinkit · by dark store
           </CardTitle>
-          {stores?.error && isMissingView(stores.error) && <SchemaNote view="blinkit_store_stats" />}
+          {stores?.error && isMissingView(stores.error) && (
+            <SchemaNote view="blinkit_store_stats" />
+          )}
         </CardHeader>
         <CardContent>
           {stores?.data?.length ? (

@@ -13,7 +13,7 @@ original build checklist; this file tracks everything added on top of it.
 | ⏸ | **Skipped for now** — not needed yet; can be picked up later |
 | ❌ | Dropped, with the reason |
 
-**Progress: 2 done · 2 working · 3 to do · 1 skipped** (by phase)
+**Progress: 2 done · 3 working · 2 to do · 1 skipped** (by phase)
 
 ---
 
@@ -147,17 +147,30 @@ Desktop app + dashboard · needs `.exe` rebuild
 - [ ] *Optional later:* review text → sentiment + themes via Claude API (needs an API key;
       Amazon's full review pages need login, so check feasibility first)
 
-## Phase 5 — Competitor SKUs  ⬜ To do
+## Phase 5 — Competitor SKUs  🟡 Working
 
-Desktop app + sheet · needs `.exe` rebuild
+Desktop app + sheet + dashboard · needs `.exe` rebuild
 
-- [ ] Add a **"Competitors"** tab to `Docs/pricing link.xlsx` — Competitor of (IMECO SKU),
-      Brand, Name, Amazon Link, Flipkart Link, Blinkit Link *(you: fill in links)*
-- [ ] `desktop/catalogue.py` reads the tab; synthetic SKU like `C:<brand>:<slug>`
-- [ ] `products.brand` (default `IMECO`) and `products.competitor_of` columns
-- [ ] Prices tab filters to IMECO only — wall display unchanged
-- [ ] **Competitors** tab — IMECO vs competitors per marketplace: price, per-unit price,
-      rating, stock, "undercut by", 30-day price gap
+- [x] Optional **"Competitors"** sheet in the workbook — Competitor Of (IMECO SKU), Brand,
+      Product Name, MRP, Amazon / Flipkart / Blinkit Link. No SKU to invent: the key is made
+      from the first link (`C:amazon:B0XXXXXXXX`)
+- [x] `desktop/catalogue.py` reads it; refuses the sheet, naming the row, for an unknown IMECO
+      SKU, a row with no link, or the same link twice. IMECO's own catalogue parses
+      byte-for-byte as before (checked against the old parser on both workbooks)
+- [x] Competitors scraped exactly like IMECO listings — price, stock, ratings, dark stores
+- [x] `products.brand` (default `IMECO`) and `products.competitor_of` columns; an un-migrated
+      database still gets IMECO's prices and simply skips the competitors (tested)
+- [x] Prices board, its counts and the other tabs stay IMECO-only (tested; 22/22 tests)
+- [x] **Competitors** tab — each IMECO product with its rivals under it, per marketplace:
+      price, "₹50 cheaper than IMECO" in amber, rating; "IMECO cheapest on X of Y" per
+      marketplace; empty state explains the sheet format
+- [x] Sample "Competitors" sheet in `Docs/pricing link.example.xlsx`
+- [ ] Add the **Competitors** sheet to your workbook with real competitor links, then upload it
+      in the desktop app *(you)*
+- [ ] Run the updated `supabase/schema.sql` *(you — one run covers Phases 3, 4 and 5)*
+- [ ] Push, rebuild `.exe`, confirm competitors appear after the first run
+- ❌ Price per unit — the sheet carries no pack size to divide by; revisit if a "Pack Size"
+      column is added
 
 ## Phase 6 — Share of search / keyword rank  ⬜ To do
 
@@ -207,4 +220,5 @@ Desktop app + sheet · needs `.exe` rebuild
 | 26 Oct 2026 | Seller view: "Best now" (lowest = buyer's view) replaced by **Spread now** — high vs low channel and the gap %, amber at 20 %+; "Lowest ever" became an all-time range. Chart gets a plain-words summary per marketplace, price labels on the lines, and opens on 30 days. |
 | 26 Oct 2026 | Phases 0–1 shipped — `17c8a81`, live on Vercel. |
 | 26 Oct 2026 | Phase 2 (alerts) skipped for now — not needed yet. |
-| 26 Oct 2026 | Phases 3–4 built and tested: dark-store walk, ratings, Availability + Reviews tabs. Waiting on schema run + `.exe` rebuild. |
+| 26 Oct 2026 | Phases 3–4 built and tested: dark-store walk, ratings, Availability + Reviews tabs. Waiting on schema run + `.exe` rebuild. Committed locally (`34af673`), not pushed. |
+| 26 Oct 2026 | Phase 5 built and tested: Competitors sheet, competitor scraping, Competitors tab. Waiting on your competitor links, schema run + `.exe` rebuild. |

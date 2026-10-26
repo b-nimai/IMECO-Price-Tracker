@@ -104,7 +104,10 @@ def summarise_catalogue(products: list[Product]) -> str:
         for marketplace in p.urls:
             counts[marketplace] = counts.get(marketplace, 0) + 1
     per = ", ".join(f"{m} {n}" for m, n in sorted(counts.items(), key=lambda kv: -kv[1]))
-    return f"{len(products)} products, {sum(len(p.urls) for p in products)} listings ({per})"
+    own = sum(p.competitor_of is None for p in products)
+    rivals = len(products) - own
+    who = f"{own} products" + (f" + {rivals} competitor{'s' * (rivals != 1)}" if rivals else "")
+    return f"{who}, {sum(len(p.urls) for p in products)} listings ({per})"
 
 # Column A carries a U+2605 star on 24 of 32 rows. It has to come off before the SKU can be
 # used as a database key, but it is kept as `Product.starred`.
@@ -189,69 +192,164 @@ def load_products(path: Path | None = None) -> list[Product]:
     if not path.exists():
         raise FileNotFoundError(f"catalogue workbook not found: {path}")
 
-    ws = load_workbook(path, data_only=True, read_only=True).worksheets[0]
-    rows = ws.iter_rows(values_only=True)
+    book = load_workbook(path, data_only=True, read_only=True)
+    products = _own_products(book.worksheets[0], path)
+    rivals = next((ws for ws in book.worksheets if ws.title.strip().lower() == COMPETITOR_SHEET), None)
+    if rivals is not None:
+        products += _competitors(rivals, path, products)
 
+    _reject_duplicates(products, path)
+    return products
+
+
+def _header(rows, path: Path, sheet: str) -> tuple[dict[str, int], dict[int, tuple[str, str]]]:
+    """(fixed column -> index, index -> (marketplace, kind)) from a sheet's first row.
+
+    Driven by header text rather than position so inserting a column does not silently shift
+    every price.
+    """
     try:
         header = next(rows)
     except StopIteration as exc:
-        raise ValueError(f"{path.name} is empty") from exc
+        raise ValueError(f"{path.name}: the {sheet} sheet is empty") from exc
 
-    # Map column index -> (marketplace, kind), plus the three fixed columns. Driven by header
-    # text rather than position so inserting a column does not silently shift every price.
+    fixed: dict[str, int] = {}
     cols: dict[int, tuple[str, str]] = {}
-    sku_col = name_col = mrp_col = None
     for i, cell in enumerate(header):
         key = str(cell or "").strip().lower()
-        if key == "sku":
-            sku_col = i
-        elif key == "product name":
-            name_col = i
-        elif key == "mrp":
-            mrp_col = i
-        elif key in HEADERS:
+        if key in HEADERS:
             cols[i] = HEADERS[key]
+        elif key:
+            fixed.setdefault(key, i)
+    return fixed, cols
 
+
+def _read_listings(product: Product, row: tuple, cols: dict[int, tuple[str, str]]) -> None:
+    """Fill a product's links and target prices from its row."""
+    for i, (marketplace, kind) in cols.items():
+        if i >= len(row):
+            continue
+        value = row[i]
+        if value is None:
+            continue
+        if kind == "sp":
+            price = parse_price(value)
+            if price is not None:
+                product.target_sp[marketplace] = price
+        else:
+            url = canonical_url(marketplace, str(value))
+            if url:
+                product.urls[marketplace] = url
+
+
+def _cell(row: tuple, index: int | None) -> object:
+    return row[index] if index is not None and index < len(row) else None
+
+
+def _own_products(ws, path: Path) -> list[Product]:
+    """IMECO's own catalogue: the workbook's first sheet."""
+    rows = ws.iter_rows(values_only=True)
+    fixed, cols = _header(rows, path, "first")
+    sku_col, name_col, mrp_col = fixed.get("sku"), fixed.get("product name"), fixed.get("mrp")
     if sku_col is None or name_col is None:
         raise ValueError(f"{path.name}: missing required 'SKU' / 'Product Name' headers")
 
     products: list[Product] = []
     for row in rows:
-        raw_sku = str(row[sku_col] or "").replace(STAR, "").strip()
+        raw_sku = str(_cell(row, sku_col) or "").replace(STAR, "").strip()
         if not raw_sku:
             continue  # blank spacer row
 
         product = Product(
             sku=raw_sku,
-            name=str(row[name_col] or "").strip(),
-            mrp=parse_price(row[mrp_col]) if mrp_col is not None else None,
-            starred=STAR in str(row[sku_col] or ""),
+            name=str(_cell(row, name_col) or "").strip(),
+            mrp=parse_price(_cell(row, mrp_col)),
+            starred=STAR in str(_cell(row, sku_col) or ""),
             # Position among PARSED rows, not among worksheet rows: blank spacers are skipped
             # above, and a gap in the numbering would otherwise appear wherever the sheet has
             # one. The dashboard only ever sorts on this, so density is what matters, not
             # matching a row number in Excel.
             position=len(products),
         )
-
-        for i, (marketplace, kind) in cols.items():
-            if i >= len(row):
-                continue
-            value = row[i]
-            if value is None:
-                continue
-            if kind == "sp":
-                price = parse_price(value)
-                if price is not None:
-                    product.target_sp[marketplace] = price
-            else:
-                url = canonical_url(marketplace, str(value))
-                if url:
-                    product.urls[marketplace] = url
-
+        _read_listings(product, row, cols)
         products.append(product)
-
-    _reject_duplicates(products, path)
     return products
+
+
+# ── Competitors ─────────────────────────────────────────────────────────────────────────
+# An optional second sheet, named "Competitors", listing rival products to price against
+# IMECO's. One row per competing product:
+#
+#   Competitor Of | Brand | Product Name | MRP | Amazon Link | Flipkart Link | Blinkit Link
+#
+# "Competitor Of" is the IMECO SKU it competes with. There is deliberately no SKU column to
+# fill in: a competitor's key is made from its first link (`C:amazon:B0XXXXXXXX`), which is
+# already unique and stays the same however the row is edited or moved. An explicit "SKU"
+# column is still honoured if someone adds one.
+COMPETITOR_SHEET = "competitors"
+_LISTING_ID = {
+    "amazon": re.compile(r"/dp/([A-Z0-9]{10})"),
+    "flipkart": re.compile(r"[?&]pid=([A-Z0-9]+)"),
+    "blinkit": re.compile(r"/prid/(\d+)"),
+}
+
+
+def _competitor_key(product: Product) -> str | None:
+    for marketplace in ("amazon", "flipkart", "blinkit"):
+        url = product.urls.get(marketplace)
+        m = url and _LISTING_ID[marketplace].search(url)
+        if m:
+            return f"C:{marketplace}:{m.group(1)}"
+    return None
+
+
+def _competitors(ws, path: Path, own: list[Product]) -> list[Product]:
+    """The "Competitors" sheet. Refused, by row, if a row points at an IMECO SKU that does not
+    exist — the same reasoning as `_reject_duplicates`: tell the operator now, while they are
+    looking at the file, not an hour later inside a scheduled run."""
+    rows = ws.iter_rows(values_only=True)
+    fixed, cols = _header(rows, path, "Competitors")
+    of_col = fixed.get("competitor of")
+    if of_col is None:
+        raise ValueError(f"{path.name}: the Competitors sheet needs a 'Competitor Of' column")
+    brand_col, name_col = fixed.get("brand"), fixed.get("product name")
+    mrp_col, sku_col = fixed.get("mrp"), fixed.get("sku")
+
+    known = {p.sku for p in own}
+    out: list[Product] = []
+    for n, row in enumerate(rows, start=2):  # Excel row number, header being row 1
+        of = str(_cell(row, of_col) or "").replace(STAR, "").strip()
+        if not of:
+            continue  # blank spacer row
+        if of not in known:
+            raise ValueError(
+                f"{path.name}: Competitors row {n} says 'Competitor Of' {of!r}, which is not a "
+                "SKU on the first sheet. Use the IMECO SKU exactly as it is written there."
+            )
+
+        product = Product(
+            sku="",
+            name=str(_cell(row, name_col) or "").strip(),
+            mrp=parse_price(_cell(row, mrp_col)),
+            starred=False,
+            # After every IMECO product, so a competitor can never sit among them in sheet order.
+            position=len(own) + len(out),
+            brand=str(_cell(row, brand_col) or "").strip() or "Unknown brand",
+            competitor_of=of,
+        )
+        _read_listings(product, row, cols)
+
+        explicit = str(_cell(row, sku_col) or "").strip()
+        key = explicit or _competitor_key(product)
+        if not key:
+            raise ValueError(
+                f"{path.name}: Competitors row {n} has no Amazon, Flipkart or Blinkit link."
+            )
+        product.sku = key
+        if not product.name:
+            product.name = f"{product.brand} ({key})"
+        out.append(product)
+    return out
 
 
 def _reject_duplicates(products: list[Product], path: Path) -> None:
@@ -275,6 +373,12 @@ def _reject_duplicates(products: list[Product], path: Path) -> None:
 
     if repeated:
         listed = ", ".join(repeated)
+        if all(s.startswith("C:") for s in repeated):
+            # Competitor keys are made from the link, so a repeat means the same listing twice.
+            raise ValueError(
+                f"{path.name}: the Competitors sheet lists the same product link twice ({listed}). "
+                "Keep one row per competitor product and try again."
+            )
         raise ValueError(
             f"{path.name}: the same SKU appears on more than one row ({listed}). "
             "Every product needs its own SKU — merge or rename those rows and try again."
@@ -297,6 +401,7 @@ def _main() -> int:
     for marketplace, n in sorted(counts.items(), key=lambda kv: -kv[1]):
         print(f"  {marketplace:<9} {n}")
     print(f"\nstarred: {sum(p.starred for p in products)}")
+    print(f"competitors: {sum(p.competitor_of is not None for p in products)}")
     print(f"total listings to fetch: {sum(len(p.urls) for p in products)}\n")
 
     for p in products[:3]:

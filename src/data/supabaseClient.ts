@@ -64,24 +64,29 @@ const PRODUCT_COLS = 'sku,name,mrp,starred,target_sp,urls';
 /**
  * The catalogue, in the spreadsheet's own row order.
  *
- * `position` was added to the schema after this dashboard shipped, and PostgREST answers a
- * request for a column that does not exist with a 400 rather than by ignoring it. So a
- * database that has not had the migration in supabase/schema.sql applied would show no prices
- * at all — the retry below is what stops a pending migration from blanking the wall display.
- * It costs one extra request only while the column is missing.
+ * `position`, then `brand` / `competitor_of`, were added to the schema after this dashboard
+ * shipped, and PostgREST answers a request for a column that does not exist with a 400 rather
+ * than by ignoring it. So a database that has not had the migrations in supabase/schema.sql
+ * applied would show no prices at all — the fallbacks below are what stop a pending migration
+ * from blanking the wall display. Each costs one extra request only while its column is missing.
  */
 async function fetchProducts(): Promise<ProductRow[]> {
-  try {
-    return await get<ProductRow[]>(
-      `products?select=${PRODUCT_COLS},position&order=position.asc.nullslast`,
-      'products',
-    );
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (!message.includes('position')) throw err;
-    console.warn('[prices] products.position missing — run supabase/schema.sql to restore sheet order');
-    return get<ProductRow[]>(`products?select=${PRODUCT_COLS}`, 'products');
+  const attempts = [
+    `${PRODUCT_COLS},position,brand,competitor_of&order=position.asc.nullslast`,
+    `${PRODUCT_COLS},position&order=position.asc.nullslast`,
+    PRODUCT_COLS,
+  ];
+  for (const [i, cols] of attempts.entries()) {
+    try {
+      return await get<ProductRow[]>(`products?select=${cols}`, 'products');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const missing = /position|brand|competitor_of/.exec(message)?.[0];
+      if (!missing || i === attempts.length - 1) throw err;
+      console.warn(`[prices] products.${missing} missing — run supabase/schema.sql`);
+    }
   }
+  throw new Error('unreachable');
 }
 
 export async function fetchPrices(): Promise<Omit<CachedPayload, 'fetchedAt'>> {
