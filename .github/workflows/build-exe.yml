@@ -1,10 +1,17 @@
 # Builds desktop/dist/IMECO Price Tracker.exe on a Windows runner, for when no Windows machine
 # is at hand. Run it from the Actions tab or `gh workflow run build-exe.yml`.
 #
-# Deliberately built WITHOUT ../.env: this repo is public and so are its workflow artifacts, so
-# no Supabase key is baked in. The .exe prompts for credentials on first launch (or finds them
-# already in Windows Credential Manager), and bundles the example sheet — the operator's own
-# sheet, uploaded through the Spreadsheet button, still takes precedence.
+# The Supabase credentials are baked in, exactly as a local build.ps1 with a ../.env does, so
+# the .exe runs on a staff PC without a setup prompt. They come from repository secrets
+# (SUPABASE_URL, SUPABASE_SERVICE_KEY) and the .env holding them exists only on the runner.
+#
+# THE CATCH, and why the artifact is encrypted: this repo is public, so its workflow artifacts
+# are downloadable by anyone signed in to GitHub — and a baked key is recoverable from the .exe
+# with `strings`. Only an AES-256 encrypted copy is uploaded; the password (EXE_ARCHIVE_PASSWORD)
+# is a repository secret and also sits in the gitignored local .env. Decrypt after download:
+#
+#   openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass env:EXE_ARCHIVE_PASSWORD \
+#     -in "IMECO Price Tracker.exe.enc" -out "IMECO Price Tracker.exe"
 name: Build Windows exe
 
 on:
@@ -18,11 +25,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Write .env from secrets
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          EXE_ARCHIVE_PASSWORD: ${{ secrets.EXE_ARCHIVE_PASSWORD }}
+        run: |
+          # Refuse to build at all rather than publish an unencrypted or unbaked .exe.
+          [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_SERVICE_KEY" ] && [ -n "$EXE_ARCHIVE_PASSWORD" ] \
+            || { echo "missing repository secret(s)"; exit 1; }
+          printf 'SUPABASE_URL=%s\nSUPABASE_SERVICE_KEY=%s\n' "$SUPABASE_URL" "$SUPABASE_SERVICE_KEY" > .env
+
       - name: Build
         shell: powershell
         run: ./desktop/build.ps1
+
+      - name: Encrypt the exe
+        shell: bash
+        env:
+          EXE_ARCHIVE_PASSWORD: ${{ secrets.EXE_ARCHIVE_PASSWORD }}
+        run: |
+          rm -f .env
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 600000 -pass env:EXE_ARCHIVE_PASSWORD \
+            -in "desktop/dist/IMECO Price Tracker.exe" -out "desktop/dist/IMECO Price Tracker.exe.enc"
+          rm -f "desktop/dist/IMECO Price Tracker.exe"
+
       - uses: actions/upload-artifact@v4
         with:
-          name: IMECO-Price-Tracker-exe
-          path: desktop/dist/IMECO Price Tracker.exe
+          name: IMECO-Price-Tracker-exe-encrypted
+          path: desktop/dist/IMECO Price Tracker.exe.enc
+          if-no-files-found: error
           retention-days: 7
