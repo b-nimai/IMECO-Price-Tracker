@@ -88,6 +88,32 @@ create or replace view latest_prices
   from price_snapshots
   order by sku, marketplace, checked_at desc;
 
+-- One row per SKU x marketplace summarising its price history, for the dashboard's Trends tab.
+-- Aggregated here because the browser cannot afford the raw rows: 30 days is ~75k snapshots,
+-- and PostgREST caps a response at 1,000.
+--
+-- Lows and highs count only `ok` readings, a price someone could actually pay. Changes count
+-- `out_of_stock` readings too, because an OOS listing still carries its true price (see
+-- price_snapshots.price above).
+create or replace view price_stats
+  with (security_invoker = on) as
+  with priced as (
+    select sku, marketplace, price, status, checked_at,
+           lag(price) over (partition by sku, marketplace order by checked_at) as prev_price
+    from price_snapshots
+    where status in ('ok', 'out_of_stock') and price is not null
+  )
+  select sku, marketplace,
+         min(price) filter (where status = 'ok')                                         as min_ever,
+         max(price) filter (where status = 'ok')                                         as max_ever,
+         min(price) filter (where status = 'ok' and checked_at >= now() - interval '30 days') as min_30d,
+         max(price) filter (where status = 'ok' and checked_at >= now() - interval '30 days') as max_30d,
+         count(*)   filter (where checked_at >= now() - interval '30 days'
+                              and prev_price is not null and prev_price <> price)         as changes_30d,
+         min(checked_at)                                                                  as first_seen
+  from priced
+  group by sku, marketplace;
+
 -- ── Row Level Security ──────────────────────────────────────────────────────────────────
 -- With RLS enabled and only SELECT policies defined, anon can read and nothing else.
 -- service_role bypasses RLS entirely, which is how the desktop app writes.
@@ -104,7 +130,7 @@ create policy "public read products"  on products        for select to anon, aut
 create policy "public read runs"      on runs            for select to anon, authenticated using (true);
 create policy "public read snapshots" on price_snapshots for select to anon, authenticated using (true);
 
-grant select on products, runs, price_snapshots, latest_prices to anon, authenticated;
+grant select on products, runs, price_snapshots, latest_prices, price_stats to anon, authenticated;
 
 -- ── Verification ────────────────────────────────────────────────────────────────────────
 -- Confirms no INSERT/UPDATE/DELETE policy was created by accident. Expect zero rows.

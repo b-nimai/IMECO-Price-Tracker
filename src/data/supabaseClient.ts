@@ -110,6 +110,55 @@ export async function fetchPrices(): Promise<Omit<CachedPayload, 'fetchedAt'>> {
   return { products, snapshots, previous };
 }
 
+// ── history (Trends tab) ────────────────────────────────────────────────────────────────
+// Fetched on demand when the tab is opened, never by the 2-minute poll: the wall display
+// should not pay for a view nobody is looking at.
+
+export interface HistoryRow {
+  marketplace: string;
+  price: number | null;
+  status: string;
+  checked_at: string;
+}
+
+/** PostgREST answers at most 1,000 rows per request; 90 days of one product is ~6.5k. */
+const PAGE = 1000;
+
+/** Every reading of one product over the last `days`, oldest first. */
+export async function fetchHistory(sku: string, days: number): Promise<HistoryRow[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  const base =
+    `price_snapshots?select=marketplace,price,status,checked_at` +
+    `&sku=eq.${encodeURIComponent(sku)}&checked_at=gte.${encodeURIComponent(since)}` +
+    `&order=checked_at.asc,id.asc`;
+
+  const rows: HistoryRow[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const page = await get<HistoryRow[]>(`${base}&limit=${PAGE}&offset=${offset}`, 'history');
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+}
+
+export interface PriceStatsRow {
+  sku: string;
+  marketplace: string;
+  min_ever: number | null;
+  max_ever: number | null;
+  min_30d: number | null;
+  max_30d: number | null;
+  changes_30d: number;
+  first_seen: string;
+}
+
+/** Lows, highs and change counts per listing — the `price_stats` view in supabase/schema.sql. */
+export async function fetchPriceStats(): Promise<PriceStatsRow[]> {
+  return get<PriceStatsRow[]>(
+    'price_stats?select=sku,marketplace,min_ever,max_ever,min_30d,max_30d,changes_30d,first_seen',
+    'price_stats',
+  );
+}
+
 // ── localStorage ────────────────────────────────────────────────────────────────────────
 // A reload inside the TTL paints from disk with zero network. The scrape lands once an hour,
 // so a two-minute cache costs nothing in freshness.

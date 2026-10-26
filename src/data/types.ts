@@ -13,6 +13,18 @@ export const MARKETPLACE_LABELS: Record<Marketplace, string> = {
 };
 
 /**
+ * Series colour per marketplace, for charts. Fixed to the marketplace, never to its rank, so a
+ * channel keeps its colour when another drops out. These are the first three `--chart-*` slots
+ * of the dark theme, validated as a set against the #111 card surface (colour-blind separation
+ * and 3:1 contrast all pass).
+ */
+export const MARKETPLACE_COLORS: Record<Marketplace, string> = {
+  amazon: 'var(--chart-1)',
+  flipkart: 'var(--chart-2)',
+  blinkit: 'var(--chart-3)',
+};
+
+/**
  * Why a cell does or does not carry a price. Mirrors desktop/models.py — the two must stay in
  * step, which is why the database also constrains this column.
  *
@@ -158,6 +170,29 @@ function emptyCell(marketplace: Marketplace, targetSp: number | null, url: strin
 function catalogued(products: ProductRow[]): ProductRow[] {
   const positioned = products.filter((p) => p.position != null);
   return positioned.length ? positioned : products;
+}
+
+/**
+ * THE SHEET'S OWN ORDER, top to bottom. The board and `Docs/pricing link.xlsx` are read side by
+ * side, and a row has to be findable by looking where it sits in the workbook.
+ *
+ * This replaced a most-prices-first ranking. That filled the grid from the top and pushed the
+ * gaps to the bottom, which looked tidier — but it meant every row moved whenever a scrape lost
+ * or gained a price, so nothing was ever twice in the same place.
+ *
+ * A null position is a SKU the current sheet does not list (or a database still missing the
+ * `position` column). Those have no place in the sheet's order, so they collect at the bottom
+ * in name order.
+ */
+export function sheetOrder(rows: Row[]): Row[] {
+  return [...rows].sort((a, b) => {
+    if (a.position == null || b.position == null) {
+      if (a.position != null) return -1;
+      if (b.position != null) return 1;
+      return a.name.localeCompare(b.name);
+    }
+    return a.position - b.position;
+  });
 }
 
 /**

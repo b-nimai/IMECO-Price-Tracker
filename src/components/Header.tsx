@@ -1,4 +1,5 @@
 import { RefreshCw } from 'lucide-react';
+import type { ReactNode } from 'react';
 
 import { LiveClock } from '@/components/LiveClock';
 import { LogoMark } from '@/components/LogoMark';
@@ -20,6 +21,8 @@ interface Props {
   error: string | null;
   /** When the newest snapshot was TAKEN — not when the browser last fetched it. */
   checkedAt: number | null;
+  /** The tab switcher. Lives in the header so the wall display's grid loses no height to it. */
+  nav?: ReactNode;
 }
 
 /**
@@ -65,6 +68,7 @@ export function Header({
   syncing,
   error,
   checkedAt,
+  nav,
 }: Props) {
   // Staleness is measured from when prices were SCRAPED, not from the browser's last poll.
   // Polling a two-day-old database every two minutes must never look fresh — and with a
@@ -73,7 +77,7 @@ export function Header({
 
   return (
     <header className="card-glass flex flex-none flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-2.5">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="ghost"
           size="icon"
@@ -99,6 +103,7 @@ export function Header({
             </span>
           </div>
         </div>
+        {nav}
       </div>
 
       <div className="flex flex-wrap items-center gap-3">

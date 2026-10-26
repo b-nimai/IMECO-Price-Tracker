@@ -1,0 +1,480 @@
+import { ArrowDown, ArrowUp, Search, TriangleAlert } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+
+import { PriceChart, type Series } from '@/components/PriceChart';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { formatPct, formatPrice } from '@/data/format';
+import {
+  CONFIGURED,
+  fetchHistory,
+  fetchPriceStats,
+  type HistoryRow,
+  type PriceStatsRow,
+} from '@/data/supabaseClient';
+import {
+  MARKETPLACE_COLORS,
+  MARKETPLACE_LABELS,
+  MARKETPLACES,
+  sheetOrder,
+  type Cell,
+  type Marketplace,
+  type Row,
+} from '@/data/types';
+import { cn } from '@/lib/utils';
+
+const RANGES = [7, 30, 90] as const;
+type Range = (typeof RANGES)[number];
+const DAY = 86_400_000;
+
+/** One async result, tagged with what it was fetched for so a stale answer is never shown. */
+interface Loaded<T> {
+  key: string;
+  at: number;
+  data: T | null;
+  error: string | null;
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function useHistory(sku: string | null, days: Range) {
+  const key = sku ? `${sku}|${days}` : '';
+  const [state, setState] = useState<Loaded<HistoryRow[]> | null>(null);
+
+  useEffect(() => {
+    if (!sku || !CONFIGURED) return;
+    let live = true;
+    fetchHistory(sku, days).then(
+      (data) => live && setState({ key, at: Date.now(), data, error: null }),
+      (err) => live && setState({ key, at: Date.now(), data: null, error: message(err) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [key, sku, days]);
+
+  return state?.key === key ? state : null;
+}
+
+function useStats() {
+  const [state, setState] = useState<Loaded<Map<string, PriceStatsRow>> | null>(null);
+
+  useEffect(() => {
+    if (!CONFIGURED) return;
+    let live = true;
+    fetchPriceStats().then(
+      (rows) =>
+        live &&
+        setState({
+          key: '',
+          at: Date.now(),
+          data: new Map(rows.map((r) => [`${r.sku}:${r.marketplace}`, r])),
+          error: null,
+        }),
+      (err) => live && setState({ key: '', at: Date.now(), data: null, error: message(err) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  return state;
+}
+
+/**
+ * Where the live price sits against the sheet's intended SP.
+ *
+ * Below target is the reading worth flagging: someone is selling under the price IMECO set,
+ * whether that is a marketplace discount or a third-party seller undercutting.
+ */
+function VsTarget({ cell }: { cell: Cell }) {
+  if (cell.status !== 'ok' || cell.price == null || !cell.targetSp) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const diff = (cell.price - cell.targetSp) / cell.targetSp;
+  if (Math.abs(diff) < 0.005) return <span className="text-muted-foreground">on target</span>;
+  const pct = `${diff > 0 ? '+' : '−'}${Math.abs(diff * 100).toFixed(0)}%`;
+  return diff < 0 ? (
+    <span className="inline-flex items-center gap-1 text-amber-400" title="Selling below target SP">
+      <TriangleAlert className="size-3" aria-hidden />
+      {pct} below
+    </span>
+  ) : (
+    <span className="text-muted-foreground">{pct} above</span>
+  );
+}
+
+/**
+ * One marketplace's cell in the listing table: today's price big, its 30-day story small.
+ *
+ * Same shape as the board on the Prices tab — a product row with a column per marketplace —
+ * so nobody has to learn a second layout to read this one.
+ */
+function ListingCell({
+  cell,
+  stats,
+  showTarget,
+}: {
+  cell: Cell;
+  stats: PriceStatsRow | undefined;
+  showTarget: boolean;
+}) {
+  if (!cell.url) return <span className="text-muted-foreground/50">Not listed</span>;
+
+  const live = cell.status === 'ok' && cell.price != null;
+  // Only meaningful when the range is a range: a price that never moved is at its low AND high.
+  const moved = stats?.min_30d != null && stats.max_30d != null && stats.min_30d < stats.max_30d;
+  const atLow = live && moved && cell.price === stats!.min_30d;
+  const atHigh = live && moved && cell.price === stats!.max_30d;
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-baseline gap-2">
+        <span
+          className={cn(
+            'text-base font-semibold tabular-nums',
+            live ? 'text-foreground' : 'text-sm font-normal text-muted-foreground',
+          )}
+        >
+          {live
+            ? formatPrice(cell.price as number)
+            : cell.status === 'out_of_stock'
+              ? 'Out of stock'
+              : cell.status === 'pending'
+                ? 'No reading yet'
+                : '—'}
+        </span>
+        {atLow && (
+          <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-emerald-400">
+            <ArrowDown className="size-3" aria-hidden />
+            30d low
+          </span>
+        )}
+        {atHigh && (
+          <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-muted-foreground">
+            <ArrowUp className="size-3" aria-hidden />
+            30d high
+          </span>
+        )}
+      </div>
+      {stats && (stats.min_30d != null || stats.changes_30d > 0) && (
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {stats.min_30d != null &&
+            (moved
+              ? `${formatPrice(stats.min_30d)} – ${formatPrice(stats.max_30d as number)}`
+              : `steady at ${formatPrice(stats.min_30d)}`)}
+          {stats.min_30d != null && stats.changes_30d > 0 && ' · '}
+          {stats.changes_30d > 0 &&
+            `${stats.changes_30d} change${stats.changes_30d === 1 ? '' : 's'}`}
+        </span>
+      )}
+      {showTarget && cell.targetSp != null && (
+        <span className="text-xs text-muted-foreground tabular-nums">
+          target {formatPrice(cell.targetSp)} <VsTarget cell={cell} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+interface Priced {
+  marketplace: Marketplace;
+  value: number;
+}
+
+/**
+ * How far apart a product's live prices are across marketplaces, from the SELLER's side.
+ *
+ * Neither end is "best": the high channel is where IMECO earns most per unit, the low one is
+ * where the price is being pushed down — and where a shopper who compares will buy. The gap
+ * between them is the reading worth acting on.
+ */
+function SpreadNow({ row }: { row: Row }) {
+  const live: Priced[] = MARKETPLACES.flatMap((m) =>
+    row.cells[m].status === 'ok' && row.cells[m].price != null
+      ? [{ marketplace: m, value: row.cells[m].price as number }]
+      : [],
+  ).sort((a, b) => b.value - a.value);
+
+  if (!live.length) return <span className="text-sm text-muted-foreground">Nowhere in stock</span>;
+  if (live.length === 1) {
+    return (
+      <div className="flex flex-col gap-0.5 text-sm">
+        <span className="text-muted-foreground">Only live on</span>
+        <Where marketplace={live[0].marketplace} />
+      </div>
+    );
+  }
+
+  const high = live[0];
+  const low = live[live.length - 1];
+  const gap = (high.value - low.value) / low.value;
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span
+        className={cn(
+          'text-base font-semibold tabular-nums',
+          gap >= 0.2 ? 'text-amber-400' : 'text-foreground',
+        )}
+        title={`${MARKETPLACE_LABELS[low.marketplace]} is ${formatPct(gap)} below ${MARKETPLACE_LABELS[high.marketplace]}`}
+      >
+        {gap < 0.005 ? 'Same price' : `${formatPct(gap)} gap`}
+      </span>
+      {gap >= 0.005 && (
+        <span className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground tabular-nums">
+          <span>high {formatPrice(high.value)}</span>
+          <Where marketplace={high.marketplace} />
+          <span>· low {formatPrice(low.value)}</span>
+          <Where marketplace={low.marketplace} />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Lowest and highest price ever recorded for a product, across every marketplace. */
+function AllTime({ row, stats }: { row: Row; stats: Map<string, PriceStatsRow> | null | undefined }) {
+  const lows = MARKETPLACES.map((m) => stats?.get(`${row.sku}:${m}`)?.min_ever).filter(
+    (v): v is number => v != null,
+  );
+  const highs = MARKETPLACES.map((m) => stats?.get(`${row.sku}:${m}`)?.max_ever).filter(
+    (v): v is number => v != null,
+  );
+  if (!lows.length) return <span className="text-muted-foreground">—</span>;
+  const lo = Math.min(...lows);
+  const hi = Math.max(...highs);
+  return (
+    <span className="text-sm text-foreground tabular-nums">
+      {lo === hi ? formatPrice(lo) : `${formatPrice(lo)} – ${formatPrice(hi)}`}
+    </span>
+  );
+}
+
+function Where({ marketplace }: { marketplace: Marketplace }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <span
+        className="inline-block size-2 rounded-full"
+        style={{ background: MARKETPLACE_COLORS[marketplace] }}
+        aria-hidden
+      />
+      {MARKETPLACE_LABELS[marketplace]}
+    </span>
+  );
+}
+
+export default function TrendsView({ rows }: { rows: Row[] }) {
+  const ordered = useMemo(() => sheetOrder(rows), [rows]);
+  const [sku, setSku] = useState<string | null>(null);
+  // 30 days by default: a week is usually too short for a price to move, and a chart of flat
+  // lines reads as broken rather than as "nothing happened".
+  const [days, setDays] = useState<Range>(30);
+  const [filter, setFilter] = useState('');
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  // Until someone picks, show the first product that is actually selling somewhere.
+  const selected =
+    ordered.find((r) => r.sku === sku) ?? ordered.find((r) => r.liveCount > 0) ?? ordered[0];
+
+  // The sheet's SP columns are optional; with none filled in, target lines are noise.
+  const hasTargets = ordered.some((r) => MARKETPLACES.some((m) => r.cells[m].targetSp));
+
+  const history = useHistory(selected?.sku ?? null, days);
+  const stats = useStats();
+
+  const chart = useMemo(() => {
+    if (!selected || !history?.data) return null;
+    const series: Series[] = MARKETPLACES.filter((m) => selected.cells[m].url).map((m) => ({
+      marketplace: m,
+      target: selected.cells[m].targetSp,
+      points: history
+        .data!.filter((h) => h.marketplace === m)
+        .map((h) => ({ t: Date.parse(h.checked_at), price: h.price, status: h.status })),
+    }));
+    return { series, from: history.at - days * DAY, to: history.at };
+  }, [selected, history, days]);
+
+  const visible = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    return q ? ordered.filter((r) => r.name.toLowerCase().includes(q)) : ordered;
+  }, [ordered, filter]);
+
+  if (!CONFIGURED) {
+    return (
+      <Card className="card-glass">
+        <CardContent className="py-10 text-center text-sm text-muted-foreground">
+          Trends read the price history in the live database, and this dashboard is running on
+          demo data.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  function pick(next: string) {
+    setSku(next);
+    chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <Card ref={chartRef} className="card-glass min-w-0 scroll-mt-2">
+        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+          <CardTitle className="flex min-w-0 items-center gap-2">
+            <label htmlFor="trend-product" className="sr-only">
+              Product
+            </label>
+            <select
+              id="trend-product"
+              value={selected?.sku ?? ''}
+              onChange={(e) => setSku(e.target.value)}
+              className="max-w-[80vw] rounded-md border border-border bg-card px-3 py-1.5 text-base font-semibold text-foreground"
+            >
+              {ordered.map((r) => (
+                <option key={r.sku} value={r.sku}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </CardTitle>
+          <div className="flex gap-1" role="group" aria-label="Time range">
+            {RANGES.map((r) => (
+              <Button
+                key={r}
+                size="sm"
+                variant={r === days ? 'secondary' : 'ghost'}
+                aria-pressed={r === days}
+                onClick={() => setDays(r)}
+              >
+                {r} days
+              </Button>
+            ))}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {history?.error ? (
+            <p className="py-16 text-center text-sm text-destructive">
+              Could not load history — {history.error.slice(0, 120)}
+            </p>
+          ) : !chart ? (
+            <div className="h-[360px] animate-pulse rounded-md bg-muted/30" />
+          ) : (
+            <PriceChart series={chart.series} from={chart.from} to={chart.to} />
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="card-glass min-w-0">
+        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-sm tracking-widest text-muted-foreground uppercase">
+              All products · last 30 days
+            </CardTitle>
+            {stats?.error && (
+              <p className="mt-1 text-xs text-amber-400">
+                Ranges and change counts need the <code>price_stats</code> view — run{' '}
+                <code>supabase/schema.sql</code> in the Supabase SQL editor.
+              </p>
+            )}
+          </div>
+          <label className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5">
+            <Search className="size-4 text-muted-foreground" aria-hidden />
+            <span className="sr-only">Filter products</span>
+            <input
+              type="search"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter products"
+              className="w-full min-w-0 bg-transparent sm:w-56 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </label>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[30%]">Product</TableHead>
+                {MARKETPLACES.map((m) => (
+                  <TableHead key={m}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className="inline-block size-2 rounded-full"
+                        style={{ background: MARKETPLACE_COLORS[m] }}
+                        aria-hidden
+                      />
+                      {MARKETPLACE_LABELS[m]}
+                    </span>
+                  </TableHead>
+                ))}
+                <TableHead title="Gap between the highest and lowest live price across marketplaces">
+                  Spread now
+                </TableHead>
+                <TableHead title="Lowest to highest price ever recorded, any marketplace">
+                  All-time range
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((row) => {
+                const isSelected = row.sku === selected?.sku;
+                return (
+                  <TableRow
+                    key={row.sku}
+                    className={cn(
+                      'cursor-pointer align-top',
+                      isSelected && 'bg-muted/50 hover:bg-muted/50',
+                    )}
+                    onClick={() => pick(row.sku)}
+                    aria-selected={isSelected}
+                  >
+                    <TableCell className="py-3 whitespace-normal">
+                      <span
+                        className={cn(
+                          'font-medium text-foreground',
+                          isSelected && 'border-l-2 border-primary pl-2',
+                        )}
+                      >
+                        {row.name}
+                      </span>
+                    </TableCell>
+                    {MARKETPLACES.map((m) => (
+                      <TableCell key={m} className="py-3">
+                        <ListingCell
+                          cell={row.cells[m]}
+                          stats={stats?.data?.get(`${row.sku}:${m}`)}
+                          showTarget={hasTargets}
+                        />
+                      </TableCell>
+                    ))}
+                    <TableCell className="py-3">
+                      <SpreadNow row={row} />
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <AllTime row={row} stats={stats?.data} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {visible.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={MARKETPLACES.length + 3} className="py-8 text-center text-muted-foreground">
+                    No product matches "{filter}".
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

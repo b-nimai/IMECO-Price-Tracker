@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 
 import { Heatmap } from '@/components/Heatmap';
 import { Card, CardContent } from '@/components/ui/card';
-import type { Row } from '@/data/types';
+import { sheetOrder, type Row } from '@/data/types';
 
 interface Props {
   rows: Row[];
@@ -11,24 +11,7 @@ interface Props {
 
 export function HeatmapView({ rows, showUnlisted }: Props) {
   const visible = useMemo(() => {
-    // THE SHEET'S OWN ORDER, top to bottom. The board and `Docs/pricing link.xlsx` are read
-    // side by side, and a row has to be findable by looking where it sits in the workbook.
-    //
-    // This replaced a most-prices-first ranking. That filled the grid from the top and pushed
-    // the gaps to the bottom, which looked tidier — but it meant every row moved whenever a
-    // scrape lost or gained a price, so nothing was ever twice in the same place.
-    //
-    // A null position is a SKU the current sheet does not list (or a database still missing
-    // the `position` column). Those have no place in the sheet's order, so they collect at the
-    // bottom in name order.
-    const sorted = [...rows].sort((a, b) => {
-      if (a.position == null || b.position == null) {
-        if (a.position != null) return -1;
-        if (b.position != null) return 1;
-        return a.name.localeCompare(b.name);
-      }
-      return a.position - b.position;
-    });
+    const sorted = sheetOrder(rows);
     return showUnlisted ? sorted : sorted.filter((r) => r.liveCount > 0);
   }, [rows, showUnlisted]);
 
