@@ -129,20 +129,25 @@ export interface HistoryRow {
 /** PostgREST answers at most 1,000 rows per request; 90 days of one product is ~6.5k. */
 const PAGE = 1000;
 
-/** Every reading of one product over the last `days`, oldest first. */
-export async function fetchHistory(sku: string, days: number): Promise<HistoryRow[]> {
-  const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const base =
-    `price_snapshots?select=marketplace,price,status,checked_at` +
-    `&sku=eq.${encodeURIComponent(sku)}&checked_at=gte.${encodeURIComponent(since)}` +
-    `&order=checked_at.asc,id.asc`;
-
-  const rows: HistoryRow[] = [];
+/** Every row of a query, a page at a time. `path` must carry a stable `order`. */
+async function getAll<T>(path: string, label: string): Promise<T[]> {
+  const rows: T[] = [];
   for (let offset = 0; ; offset += PAGE) {
-    const page = await get<HistoryRow[]>(`${base}&limit=${PAGE}&offset=${offset}`, 'history');
+    const page = await get<T[]>(`${path}&limit=${PAGE}&offset=${offset}`, label);
     rows.push(...page);
     if (page.length < PAGE) return rows;
   }
+}
+
+/** Every reading of one product over the last `days`, oldest first. */
+export async function fetchHistory(sku: string, days: number): Promise<HistoryRow[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  return getAll<HistoryRow>(
+    `price_snapshots?select=marketplace,price,status,checked_at` +
+      `&sku=eq.${encodeURIComponent(sku)}&checked_at=gte.${encodeURIComponent(since)}` +
+      `&order=checked_at.asc,id.asc`,
+    'history',
+  );
 }
 
 export interface PriceStatsRow {
@@ -223,6 +228,54 @@ export async function fetchRatings(): Promise<RatingRow[]> {
   return get<RatingRow[]>(
     'rating_trend?select=sku,marketplace,rating,rating_count,checked_at,rating_then,count_then,then_at',
     'rating_trend',
+  );
+}
+
+// ── search ranks (Search tab) ───────────────────────────────────────────────────────────
+
+export interface SearchDayRow {
+  keyword: string;
+  marketplace: string;
+  /** YYYY-MM-DD, India time. */
+  day: string;
+  results: number;
+  /** IMECO's best position, ads included. Null when IMECO is not on the page at all. */
+  best_rank: number | null;
+  best_organic_rank: number | null;
+  imeco_top10: number;
+  top10: number;
+  imeco_ads: number;
+}
+
+/** IMECO's daily rank per keyword x marketplace — the `search_rank_daily` view. */
+export async function fetchSearchDays(days: number): Promise<SearchDayRow[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+  return getAll<SearchDayRow>(
+    'search_rank_daily?select=keyword,marketplace,day,results,best_rank,best_organic_rank,imeco_top10,top10,imeco_ads' +
+      `&day=gte.${since}&order=keyword.asc,marketplace.asc,day.asc`,
+    'search_rank_daily',
+  );
+}
+
+export interface SearchResultRow {
+  keyword: string;
+  marketplace: string;
+  position: number;
+  listing_id: string;
+  title: string | null;
+  brand: string | null;
+  matched_sku: string | null;
+  price: number | null;
+  sponsored: boolean;
+  checked_at: string;
+}
+
+/** The newest results page per keyword x marketplace — the `search_latest` view. */
+export async function fetchSearchLatest(): Promise<SearchResultRow[]> {
+  return getAll<SearchResultRow>(
+    'search_latest?select=keyword,marketplace,position,listing_id,title,brand,matched_sku,price,sponsored,checked_at' +
+      '&order=keyword.asc,marketplace.asc,position.asc',
+    'search_latest',
   );
 }
 

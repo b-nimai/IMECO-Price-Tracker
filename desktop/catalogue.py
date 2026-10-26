@@ -287,7 +287,7 @@ def _own_products(ws, path: Path) -> list[Product]:
 # already unique and stays the same however the row is edited or moved. An explicit "SKU"
 # column is still honoured if someone adds one.
 COMPETITOR_SHEET = "competitors"
-_LISTING_ID = {
+LISTING_ID = {
     "amazon": re.compile(r"/dp/([A-Z0-9]{10})"),
     "flipkart": re.compile(r"[?&]pid=([A-Z0-9]+)"),
     "blinkit": re.compile(r"/prid/(\d+)"),
@@ -297,7 +297,7 @@ _LISTING_ID = {
 def _competitor_key(product: Product) -> str | None:
     for marketplace in ("amazon", "flipkart", "blinkit"):
         url = product.urls.get(marketplace)
-        m = url and _LISTING_ID[marketplace].search(url)
+        m = url and LISTING_ID[marketplace].search(url)
         if m:
             return f"C:{marketplace}:{m.group(1)}"
     return None

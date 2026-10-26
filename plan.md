@@ -13,7 +13,7 @@ original build checklist; this file tracks everything added on top of it.
 | ⏸ | **Skipped for now** — not needed yet; can be picked up later |
 | ❌ | Dropped, with the reason |
 
-**Progress: 2 done · 3 working · 2 to do · 1 skipped** (by phase)
+**Progress: 2 done · 4 working · 1 to do · 1 skipped** (by phase)
 
 ---
 
@@ -123,7 +123,8 @@ Desktop app + dashboard · needs `.exe` rebuild
       anon can read and cannot write
 - [x] **Availability** tab — in-stock % per marketplace, per-product stock with "since",
       "longest out of stock" sort, Blinkit product × dark-store grid
-- [ ] Run the updated `supabase/schema.sql` in Supabase *(you)*
+- [x] Run the updated `supabase/schema.sql` in Supabase *(done 26 Oct — Availability tab live on
+      existing history: 81 % / 90 % / 70 % in stock over 7 days)*
 - [ ] Commit + push, rebuild `.exe` (`./desktop/build-remote.sh`), install it on the PC
 - [ ] Confirm the first full walk lands (next run at 9 / 12 / 3 / 6 o'clock)
 - [ ] *Later:* optional "Locations" sheet tab to add cities (Delhi, Hyderabad, …)
@@ -142,7 +143,7 @@ Desktop app + dashboard · needs `.exe` rebuild
 - [x] `rating_trend` view — latest rating vs. 30 days ago, ratings added
 - [x] **Reviews** tab — average rating per marketplace, per-product ★ and count, "▼0.1 since …"
       flag for drops, "lowest rated first" sort
-- [ ] Run the updated `supabase/schema.sql` *(you — same step as Phase 3)*
+- [x] Run the updated `supabase/schema.sql` *(done 26 Oct)*
 - [ ] Commit + push, rebuild `.exe`, confirm ratings appear after the first run
 - [ ] *Optional later:* review text → sentiment + themes via Claude API (needs an API key;
       Amazon's full review pages need login, so check feasibility first)
@@ -167,23 +168,33 @@ Desktop app + sheet + dashboard · needs `.exe` rebuild
 - [x] Sample "Competitors" sheet in `Docs/pricing link.example.xlsx`
 - [ ] Add the **Competitors** sheet to your workbook with real competitor links, then upload it
       in the desktop app *(you)*
-- [ ] Run the updated `supabase/schema.sql` *(you — one run covers Phases 3, 4 and 5)*
+- [x] Run the updated `supabase/schema.sql` *(done 26 Oct)*
 - [ ] Push, rebuild `.exe`, confirm competitors appear after the first run
 - ❌ Price per unit — the sheet carries no pack size to divide by; revisit if a "Pack Size"
       column is added
 
-## Phase 6 — Share of search / keyword rank  ⬜ To do
+## Phase 6 — Share of search / keyword rank  🟡 Working
 
-Desktop app + sheet · needs `.exe` rebuild
+Desktop app + dashboard · needs `.exe` rebuild
 
-- [ ] **"Keywords"** sheet tab — keyword + marketplaces *(you: list keywords)*
-- [ ] Search-page adapters: Amazon `s?k=`, Flipkart `search?q=`
-- [ ] Blinkit search — investigate its JSON endpoint first; ship only if plain HTTP works
-- [ ] Match results to IMECO / competitors by ASIN / Flipkart pid, then brand text
-- [ ] `search_results` table; runs **daily** (first run after 09:00)
-- [ ] `share_of_search_daily` view — brand share of top 10 / 20, organic vs sponsored, best rank
-- [ ] **Search** tab — share over time, keyword × marketplace rank table, competitors
-      sponsoring our keywords
+- [x] Search pages read on all three marketplaces (`desktop/search.py`): Amazon `s?k=` (~60
+      results), Flipkart `search?q=` (~35), Blinkit's JSON search API (12, brand given) — each
+      with position, price and whether it is an **ad**
+- [x] Whose result: exact match on the sheet's links first, then Blinkit's own brand, then a
+      known brand in the title (IMECO, **Good Habbit**, competitors' brands); else "other" —
+      no brand is guessed from a title's first word
+- [x] 19 default keywords for IMECO's product types; an optional **"Keywords"** sheet
+      (Keyword, optional Marketplaces) replaces them
+- [x] Runs **once a day** on the first run after 9 (`--search` forces it); ~1–2 min extra
+- [x] `search_results` table, `search_latest` and `search_rank_daily` views — tested on a local
+      PostgreSQL; a same-day re-run replaces, never doubles, the day's figures
+- [x] **Search** tab — keywords where IMECO is top 10 per marketplace, rank per keyword with
+      ▲▼ vs the previous search, the whole first page per keyword with ads and brands marked
+- [x] Live check, 3 keywords: IMECO shows up mostly through **ads** (Flipkart #11 "kitchen
+      tissue roll", Blinkit #5 "garbage bags"); organic only Amazon #56
+- [ ] Run the updated `supabase/schema.sql` again *(you — adds the search table)*
+- [ ] Push, rebuild `.exe`, confirm the first daily search lands
+- [ ] *Optional:* a "Keywords" sheet with your own keywords *(you)*
 
 ## Phase 7 — Later / optional  ⬜ To do
 
@@ -221,4 +232,5 @@ Desktop app + sheet · needs `.exe` rebuild
 | 26 Oct 2026 | Phases 0–1 shipped — `17c8a81`, live on Vercel. |
 | 26 Oct 2026 | Phase 2 (alerts) skipped for now — not needed yet. |
 | 26 Oct 2026 | Phases 3–4 built and tested: dark-store walk, ratings, Availability + Reviews tabs. Waiting on schema run + `.exe` rebuild. Committed locally (`34af673`), not pushed. |
-| 26 Oct 2026 | Phase 5 built and tested: Competitors sheet, competitor scraping, Competitors tab. Waiting on your competitor links, schema run + `.exe` rebuild. |
+| 26 Oct 2026 | Phase 5 built and tested: Competitors sheet, competitor scraping, Competitors tab. Waiting on your competitor links, schema run + `.exe` rebuild. Committed locally (`47d0c82`). |
+| 26 Oct 2026 | Schema run in Supabase (Phases 3–5). Phase 6 built and tested: daily keyword search, Search tab. |

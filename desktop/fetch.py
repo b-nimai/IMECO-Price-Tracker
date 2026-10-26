@@ -258,12 +258,20 @@ class Fetcher:
         }
 
     def fetch_html(
-        self, marketplace: str, url: str, context: dict[str, str] | None = None
+        self,
+        marketplace: str,
+        url: str,
+        context: dict[str, str] | None = None,
+        json_body: dict | None = None,
     ) -> FetchResult:
         """Get a listing's HTML.
 
         `context` overrides the marketplace's default extra headers — used to ask Blinkit the
         same page from a different delivery location.
+
+        `json_body` makes it a POST of that body instead of a GET — Blinkit's search is a JSON
+        API, not a page (see desktop/search.py). The text that comes back is JSON then, not
+        HTML, but it goes through the same throttle, retries and block detection.
         """
         extra = context if context is not None else _MARKETPLACE_HEADERS.get(marketplace)
         host = httpx.URL(url).host or url
@@ -281,7 +289,10 @@ class Fetcher:
             # on top and never collide with it.
             headers = {**(extra or {}), **self._navigation_headers(url, host)}
             try:
-                response = self._client.get(url, headers=headers)
+                if json_body is None:
+                    response = self._client.get(url, headers=headers)
+                else:
+                    response = self._client.post(url, headers=headers, json=json_body)
             except httpx.HTTPError as exc:
                 last_note = f"{type(exc).__name__}: {exc}"
             else:

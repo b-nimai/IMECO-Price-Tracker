@@ -28,19 +28,21 @@ export function Where({
 export function FilterBox({
   value,
   onChange,
+  placeholder = 'Filter products',
 }: {
   value: string;
   onChange: (next: string) => void;
+  placeholder?: string;
 }) {
   return (
     <label className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5">
       <Search className="size-4 text-muted-foreground" aria-hidden />
-      <span className="sr-only">Filter products</span>
+      <span className="sr-only">{placeholder}</span>
       <input
         type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="Filter products"
+        placeholder={placeholder}
         className="w-full min-w-0 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground sm:w-56"
       />
     </label>

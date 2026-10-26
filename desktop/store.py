@@ -10,12 +10,14 @@ half-written scrape from being read as the current picture.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import httpx
 
 from .config import Settings
 from .models import Cell, LocationCheck, Product, Status
+from .search import SearchResult
 from .tls import SSL_CONTEXT
 
 TIMEOUT = 60.0
@@ -225,4 +227,41 @@ class Store:
         ]
         for i in range(0, len(rows), CHUNK):
             self._post("availability_checks", rows[i : i + CHUNK])
+        return len(rows)
+
+    # ── search ranks ────────────────────────────────────────────────────────────────────
+
+    def last_search_at(self) -> datetime | None:
+        """When the daily keyword search last ran, or None if never. Raises RuntimeError if the
+        `search_results` table does not exist yet."""
+        response = self._client.get(
+            f"{self._base}/search_results",
+            params={"select": "checked_at", "order": "checked_at.desc", "limit": "1"},
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"search_results read failed [{response.status_code}]")
+        rows = response.json()
+        return datetime.fromisoformat(rows[0]["checked_at"]) if rows else None
+
+    def save_search(self, run_id: str, results: list[SearchResult], stored: set[str]) -> int:
+        """One row per search result. `stored` is the SKUs actually in `products`: a match to
+        anything else (a competitor an un-migrated database refused) is dropped rather than
+        failing the whole write on its foreign key."""
+        rows = [
+            {
+                "run_id": run_id,
+                "keyword": r.keyword,
+                "marketplace": r.marketplace,
+                "position": r.position,
+                "listing_id": r.listing_id,
+                "title": r.title[:300],
+                "brand": r.brand,
+                "matched_sku": r.matched_sku if r.matched_sku in stored else None,
+                "price": r.price,
+                "sponsored": r.sponsored,
+            }
+            for r in results
+        ]
+        for i in range(0, len(rows), CHUNK):
+            self._post("search_results", rows[i : i + CHUNK])
         return len(rows)

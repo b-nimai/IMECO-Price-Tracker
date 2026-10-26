@@ -116,6 +116,27 @@ create index if not exists availability_checks_latest_idx
   on availability_checks (sku, area, checked_at desc);
 create index if not exists availability_checks_run_idx on availability_checks (run_id);
 
+-- The daily keyword search (desktop/search.py): every result on the first page, in the order
+-- the marketplace showed it, ads included — ours, competitors' and everyone else's.
+create table if not exists search_results (
+  id          bigserial primary key,
+  run_id      uuid not null references runs(id) on delete cascade,
+  keyword     text not null,
+  marketplace text not null check (marketplace in ('amazon','flipkart','blinkit')),
+  position    integer not null check (position > 0),
+  listing_id  text not null,           -- ASIN / Flipkart pid / Blinkit prid
+  title       text,
+  brand       text,                    -- 'IMECO' for ours; NULL when it could not be told
+  matched_sku text references products(sku) on delete set null,  -- when it IS a sheet product
+  price       numeric,
+  sponsored   boolean not null default false,
+  checked_at  timestamptz not null default now()
+);
+
+create index if not exists search_results_keyword_idx
+  on search_results (keyword, marketplace, checked_at desc);
+create index if not exists search_results_run_idx on search_results (run_id);
+
 -- ── What the dashboard reads ────────────────────────────────────────────────────────────
 
 -- One row per SKU x marketplace, most recent first. The SPA fetches this rather than the raw
@@ -234,6 +255,42 @@ create or replace view rating_trend
     limit 1
   ) f on true;
 
+-- Every result of the newest search per keyword x marketplace — the Search tab's detail list.
+create or replace view search_latest
+  with (security_invoker = on) as
+  with newest as (
+    select distinct on (keyword, marketplace) keyword, marketplace, run_id
+    from search_results
+    order by keyword, marketplace, checked_at desc
+  )
+  select s.keyword, s.marketplace, s.position, s.listing_id, s.title, s.brand, s.matched_sku,
+         s.price, s.sponsored, s.checked_at
+  from search_results s
+  join newest n on n.keyword = s.keyword and n.marketplace = s.marketplace and n.run_id = s.run_id;
+
+-- One row per keyword x marketplace x day (India time), from that day's newest search: IMECO's
+-- best rank (any, and organic only), how much of the top 10 is ours, and how many of our
+-- results were ads. A manual re-run the same day replaces, never doubles, the day's figures.
+create or replace view search_rank_daily
+  with (security_invoker = on) as
+  with day_runs as (
+    select distinct on (keyword, marketplace, (checked_at at time zone 'Asia/Kolkata')::date)
+           keyword, marketplace, (checked_at at time zone 'Asia/Kolkata')::date as day, run_id
+    from search_results
+    order by keyword, marketplace, (checked_at at time zone 'Asia/Kolkata')::date, checked_at desc
+  )
+  select d.keyword, d.marketplace, d.day,
+         count(*)                                                                 as results,
+         min(s.position) filter (where s.brand = 'IMECO')                         as best_rank,
+         min(s.position) filter (where s.brand = 'IMECO' and not s.sponsored)     as best_organic_rank,
+         count(*) filter (where s.brand = 'IMECO' and s.position <= 10)           as imeco_top10,
+         count(*) filter (where s.position <= 10)                                 as top10,
+         count(*) filter (where s.brand = 'IMECO' and s.sponsored)                as imeco_ads
+  from day_runs d
+  join search_results s
+    on s.keyword = d.keyword and s.marketplace = d.marketplace and s.run_id = d.run_id
+  group by d.keyword, d.marketplace, d.day;
+
 -- ── Row Level Security ──────────────────────────────────────────────────────────────────
 -- With RLS enabled and only SELECT policies defined, anon can read and nothing else.
 -- service_role bypasses RLS entirely, which is how the desktop app writes.
@@ -242,19 +299,23 @@ alter table products        enable row level security;
 alter table runs            enable row level security;
 alter table price_snapshots enable row level security;
 alter table availability_checks enable row level security;
+alter table search_results      enable row level security;
 
 drop policy if exists "public read products"  on products;
 drop policy if exists "public read runs"      on runs;
 drop policy if exists "public read snapshots" on price_snapshots;
 drop policy if exists "public read availability" on availability_checks;
+drop policy if exists "public read search" on search_results;
 
 create policy "public read products"  on products        for select to anon, authenticated using (true);
 create policy "public read runs"      on runs            for select to anon, authenticated using (true);
 create policy "public read snapshots" on price_snapshots for select to anon, authenticated using (true);
 create policy "public read availability" on availability_checks for select to anon, authenticated using (true);
+create policy "public read search" on search_results for select to anon, authenticated using (true);
 
 grant select on products, runs, price_snapshots, latest_prices, price_stats,
-                availability_checks, availability_stats, blinkit_store_stats, rating_trend
+                availability_checks, availability_stats, blinkit_store_stats, rating_trend,
+                search_results, search_latest, search_rank_daily
   to anon, authenticated;
 
 -- ── Verification ────────────────────────────────────────────────────────────────────────

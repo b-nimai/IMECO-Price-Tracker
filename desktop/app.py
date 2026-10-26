@@ -28,7 +28,7 @@ from .catalogue import load_products
 from .config import load_settings, save_setting
 from .fetch import Fetcher
 from .models import MARKETPLACES, LocationCheck, Product, Status
-from .run import all_stores_due, scrape, store_results
+from .run import all_stores_due, run_search, scrape, search_wanted, store_results
 
 BG = "#111111"
 FG = "#f1f5f9"
@@ -195,8 +195,11 @@ class App:
 
             with Fetcher(settings) as fetcher:
                 results = scrape(products, fetcher, progress, checks)
+                # The daily keyword search, if today's has not happened yet. No progress bar of
+                # its own: it is ~1-2 minutes after the prices, and failures only skip keywords.
+                searches = run_search(products, fetcher)[0] if search_wanted(settings) else None
 
-            store_results(settings, products, results, checks, source)
+            store_results(settings, products, results, checks, source, searches)
 
             ok = sum(c.status is Status.OK for _, c in results)
             self.events.put(("done", ok, len(results)))

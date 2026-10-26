@@ -4,6 +4,7 @@
     python -m desktop.run --dry-run       # scrape, print, store nothing
     python -m desktop.run --source scheduled
     python -m desktop.run --all-stores    # also check every Blinkit dark store, whatever the hour
+    python -m desktop.run --search        # also run the daily keyword search now
 
 Hosts run in parallel; listings within a host run sequentially behind the throttle in
 `fetch.py`. That shape is the point — it keeps per-host request rates polite while still
@@ -21,11 +22,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
+
 from .adapters import PARSERS
 from .catalogue import load_products
 from .config import Settings, load_settings
 from .fetch import BLINKIT_LOCATIONS, Fetcher
 from .models import MARKETPLACES, Cell, LocationCheck, Product, Status, Via
+from .search import SearchResult, load_keywords, search, search_due
 
 ProgressFn = Callable[[str, int, int], None]
 """(marketplace, done, total) — called after each listing so the GUI can draw a bar."""
@@ -273,21 +277,22 @@ def store_results(
     results: list[tuple[str, Cell]],
     checks: list[LocationCheck] | None,
     source: str,
+    searches: list[SearchResult] | None = None,
 ) -> tuple[str, int, str | None]:
     """Write one finished scrape. Shared by the console and the GUI so the two cannot drift.
 
-    Returns (run_id, snapshots written, warning). The dark-store rows are written BEFORE the
-    run is closed, so the dashboard never sees a finished run without them — but a failure to
-    write them is only a warning: they are the Availability tab's extra detail, and must never
+    Returns (run_id, snapshots written, warning). The dark-store and search rows are written
+    BEFORE the run is closed, so the dashboard never sees a finished run without them — but a
+    failure to write them is only a warning: they are their tabs' extra detail, and must never
     cost the board its prices.
     """
     from .store import Store
 
-    warning = None
+    warnings: list[str] = []
     with Store(settings) as store:
         stored = store.sync_products(products)
         if len(stored) < len(products):
-            warning = "competitors not stored — run supabase/schema.sql to add them"
+            warnings.append("competitors not stored — run supabase/schema.sql to add them")
             results = [(sku, cell) for sku, cell in results if sku in stored]
             checks = [c for c in checks or [] if c.sku in stored]
         run_id = store.start_run(source)
@@ -296,9 +301,43 @@ def store_results(
             try:
                 store.save_availability(run_id, checks)
             except RuntimeError as exc:
-                warning = f"dark-store checks not stored — run supabase/schema.sql? ({exc})"
+                warnings.append(f"dark-store checks not stored — run supabase/schema.sql? ({exc})")
+        if searches:
+            try:
+                store.save_search(run_id, searches, stored)
+            except RuntimeError as exc:
+                warnings.append(f"search ranks not stored — run supabase/schema.sql? ({exc})")
         store.finish_run(run_id, [c for _, c in results])
-    return run_id, written, warning
+    return run_id, written, "; ".join(warnings) or None
+
+
+def search_wanted(settings: Settings, force: bool = False) -> bool:
+    """Whether this run should also do the daily keyword search (see desktop/search.py).
+
+    Asks the database when the last one was, so it happens once a day whenever the PC is on
+    after 9 — never on a dry run unless forced, and never against a database that has no
+    `search_results` table yet (that would spend ~60 requests to store nothing).
+    """
+    if force:
+        return True
+    if not settings.can_store:
+        return False
+    from .store import Store
+
+    try:
+        with Store(settings) as store:
+            return search_due(store.last_search_at())
+    except (RuntimeError, httpx.HTTPError):
+        return False
+
+
+def run_search(products: list[Product], fetcher: Fetcher) -> tuple[list[SearchResult], list[str]]:
+    """The daily keyword search, with the workbook's keywords (or the defaults)."""
+    try:
+        keywords = load_keywords()
+    except ValueError as exc:
+        return [], [str(exc)]
+    return search(keywords, fetcher, products)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -315,6 +354,11 @@ def main(argv: list[str] | None = None) -> int:
         "--all-stores",
         action="store_true",
         help=f"ask every Blinkit dark store this run (otherwise every {ALL_STORES_EVERY_HOURS}h)",
+    )
+    parser.add_argument(
+        "--search",
+        action="store_true",
+        help="run the keyword search this run (otherwise once a day, first run after 9)",
     )
     args = parser.parse_args(argv)
 
@@ -340,8 +384,16 @@ def main(argv: list[str] | None = None) -> int:
     if checks is not None:
         print(f"checking all {len(BLINKIT_LOCATIONS)} Blinkit dark stores this run")
 
+    do_search = search_wanted(settings, args.search) and not (args.dry_run and not args.search)
+    searches: list[SearchResult] | None = None
+
     with Fetcher(settings) as fetcher:
         results = scrape(products, fetcher, checks=checks)
+        if do_search:
+            print("running the daily keyword search")
+            searches, problems = run_search(products, fetcher)
+            for problem in problems:
+                print(f"  ! search: {problem}")
 
     elapsed = time.monotonic() - started
     for marketplace in MARKETPLACES:
@@ -358,10 +410,18 @@ def main(argv: list[str] | None = None) -> int:
         print("dry run — nothing written to Supabase")
         return 0
 
-    run_id, written, warning = store_results(settings, products, results, checks, args.source)
+    if searches is not None:
+        ours = sum(r.brand == "IMECO" for r in searches)
+        print(f"search: {len(searches)} results, {ours} of them IMECO's")
+
+    run_id, written, warning = store_results(
+        settings, products, results, checks, args.source, searches
+    )
     print(f"\nstored {written} snapshots (run {run_id})")
     if checks and not warning:
         print(f"stored {len(checks)} dark-store checks")
+    if searches and not warning:
+        print(f"stored {len(searches)} search results")
     if warning:
         print(f"  ! {warning}")
     return 0

@@ -14,8 +14,9 @@ const TrendsView = lazy(() => import('@/views/TrendsView'));
 const AvailabilityView = lazy(() => import('@/views/AvailabilityView'));
 const ReviewsView = lazy(() => import('@/views/ReviewsView'));
 const CompetitorsView = lazy(() => import('@/views/CompetitorsView'));
+const SearchView = lazy(() => import('@/views/SearchView'));
 
-const TABS = ['prices', 'trends', 'availability', 'reviews', 'competitors'] as const;
+const TABS = ['prices', 'trends', 'availability', 'reviews', 'competitors', 'search'] as const;
 type Tab = (typeof TABS)[number];
 const TAB_LABELS: Record<Tab, string> = {
   prices: 'Prices',
@@ -23,6 +24,7 @@ const TAB_LABELS: Record<Tab, string> = {
   availability: 'Availability',
   reviews: 'Reviews',
   competitors: 'Competitors',
+  search: 'Search',
 };
 
 /**
@@ -102,6 +104,7 @@ export function App() {
             {tab === 'competitors' && (
               <CompetitorsView rows={data.rows} competitors={data.competitors} />
             )}
+            {tab === 'search' && <SearchView />}
           </Suspense>
         </main>
       )}
