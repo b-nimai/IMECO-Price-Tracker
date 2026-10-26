@@ -12,7 +12,7 @@ original build checklist; this file tracks everything added on top of it.
 | ⬜ | **To do** |
 | ❌ | Dropped, with the reason |
 
-**Progress: 0 done · 2 working · 7 to do** (by phase)
+**Progress: 2 done · 0 working · 7 to do** (by phase)
 
 ---
 
@@ -48,7 +48,7 @@ deploy). Phases 2–6 change the desktop app and need `./desktop/build-remote.sh
 
 ---
 
-## Phase 0 — Navigation shell  🟡 Working
+## Phase 0 — Navigation shell  ✅ Done
 
 Dashboard only · no `.exe` rebuild
 
@@ -56,11 +56,11 @@ Dashboard only · no `.exe` rebuild
 - [x] Selected tab kept in the URL hash, e.g. `/#trends` (`src/hooks/useHashTab.ts`)
 - [x] Non-Prices views code-split, so the wall display downloads nothing extra
 - [x] Wall display unchanged — still opens on Prices
-- [ ] Commit + push → Vercel deploy
+- [x] Commit + push → Vercel deploy (`17c8a81`, 26 Oct)
 - Note: tabs for Availability / Search / Reviews / Competitors are added when their phase
   ships, rather than as empty placeholders now.
 
-## Phase 1 — Price history & trends  🟡 Working
+## Phase 1 — Price history & trends  ✅ Done
 
 Dashboard + one SQL view · no `.exe` rebuild
 
@@ -78,7 +78,7 @@ Dashboard + one SQL view · no `.exe` rebuild
       phone widths
 - [x] Target / vs-target columns — shown automatically once the sheet has SP values
 - [x] Typecheck, lint, 20/20 tests, production build, visual check in a browser
-- [ ] Commit + push → Vercel deploy, confirm live
+- [x] Commit + push → Vercel deploy, confirmed live (`17c8a81`, 26 Oct)
 - [ ] Fill in the SP (target price) columns in the sheet so "vs target" lights up *(you)*
 
 ## Phase 2 — Alerts  ⬜ To do
@@ -184,3 +184,4 @@ Desktop app + sheet · needs `.exe` rebuild
 | 26 Oct 2026 | 42signals researched, plan agreed. Phases 0–1 built and tested locally. `price_stats` view run in Supabase. |
 | 26 Oct 2026 | Trends tab redesigned for readability: one row per product instead of one per listing. |
 | 26 Oct 2026 | Seller view: "Best now" (lowest = buyer's view) replaced by **Spread now** — high vs low channel and the gap %, amber at 20 %+; "Lowest ever" became an all-time range. Chart gets a plain-words summary per marketplace, price labels on the lines, and opens on 30 days. |
+| 26 Oct 2026 | Phases 0–1 shipped — `17c8a81`, live on Vercel. Next: Phase 2 (Telegram alerts). |
