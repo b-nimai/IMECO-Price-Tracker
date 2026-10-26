@@ -304,11 +304,19 @@ def _competitor_key(product: Product) -> str | None:
 
 
 def _competitors(ws, path: Path, own: list[Product]) -> list[Product]:
-    """The "Competitors" sheet. Refused, by row, if a row points at an IMECO SKU that does not
-    exist — the same reasoning as `_reject_duplicates`: tell the operator now, while they are
-    looking at the file, not an hour later inside a scheduled run."""
+    """The "Competitors" sheet.
+
+    Built to be filled in GRADUALLY: an empty sheet, a header with no rows, or a row whose links
+    have not been found yet are all fine — they simply add no competitors yet. Only a genuine
+    mistake is refused, by row: a "Competitor Of" that is not an IMECO SKU (a typo would
+    otherwise compare a rival against nothing). Same reasoning as `_reject_duplicates`: tell the
+    operator now, while they are looking at the file, not an hour later in a scheduled run.
+    """
     rows = ws.iter_rows(values_only=True)
-    fixed, cols = _header(rows, path, "Competitors")
+    first = next(rows, None)
+    if first is None or not any(str(c or "").strip() for c in first):
+        return []  # an empty placeholder sheet
+    fixed, cols = _header(iter([first]), path, "Competitors")
     of_col = fixed.get("competitor of")
     if of_col is None:
         raise ValueError(f"{path.name}: the Competitors sheet needs a 'Competitor Of' column")
@@ -342,9 +350,7 @@ def _competitors(ws, path: Path, own: list[Product]) -> list[Product]:
         explicit = str(_cell(row, sku_col) or "").strip()
         key = explicit or _competitor_key(product)
         if not key:
-            raise ValueError(
-                f"{path.name}: Competitors row {n} has no Amazon, Flipkart or Blinkit link."
-            )
+            continue  # no link found for it yet — nothing to fetch until one is added
         product.sku = key
         if not product.name:
             product.name = f"{product.brand} ({key})"

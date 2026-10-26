@@ -29,7 +29,7 @@ from .catalogue import load_products
 from .config import Settings, load_settings
 from .fetch import BLINKIT_LOCATIONS, Fetcher
 from .models import MARKETPLACES, Cell, LocationCheck, Product, Status, Via
-from .search import SearchResult, load_keywords, search, search_due
+from .search import DEFAULT_KEYWORDS, SearchResult, load_keywords, search, search_due
 
 ProgressFn = Callable[[str, int, int], None]
 """(marketplace, done, total) — called after each listing so the GUI can draw a bar."""
@@ -332,12 +332,19 @@ def search_wanted(settings: Settings, force: bool = False) -> bool:
 
 
 def run_search(products: list[Product], fetcher: Fetcher) -> tuple[list[SearchResult], list[str]]:
-    """The daily keyword search, with the workbook's keywords (or the defaults)."""
+    """The daily keyword search, with the workbook's keywords (or the defaults).
+
+    Never raises for a workbook problem: a Keywords sheet it cannot read falls back to the
+    default keywords, with the reason reported, so a typo in a header costs nothing but a note.
+    """
+    problems: list[str] = []
     try:
         keywords = load_keywords()
-    except ValueError as exc:
-        return [], [str(exc)]
-    return search(keywords, fetcher, products)
+    except Exception as exc:
+        problems.append(f"{exc} — searched the default keywords instead")
+        keywords = [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
+    results, issues = search(keywords, fetcher, products)
+    return results, problems + issues
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -406,13 +413,13 @@ def main(argv: list[str] | None = None) -> int:
         write_fixture(Path(args.fixture), products, results)
         print(f"\nfixture written to {args.fixture}")
 
-    if args.dry_run:
-        print("dry run — nothing written to Supabase")
-        return 0
-
     if searches is not None:
         ours = sum(r.brand == "IMECO" for r in searches)
         print(f"search: {len(searches)} results, {ours} of them IMECO's")
+
+    if args.dry_run:
+        print("dry run — nothing written to Supabase")
+        return 0
 
     run_id, written, warning = store_results(
         settings, products, results, checks, args.source, searches

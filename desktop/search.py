@@ -255,6 +255,9 @@ def load_keywords(path: Path | None = None) -> list[tuple[str, tuple[str, ...]]]
     """[(keyword, marketplaces)] from the workbook's "Keywords" sheet, else the defaults.
 
     A blank "Marketplaces" cell means all three. Duplicates are dropped, case-insensitively.
+    A sheet with no keywords in it yet means the defaults too — an empty placeholder must not
+    switch the daily search off. Raises ValueError only for a sheet that has rows but no
+    "Keyword" header; `run.run_search` then searches the defaults and reports why.
     """
     path = path or active_workbook()
     sheet = None
@@ -267,6 +270,8 @@ def load_keywords(path: Path | None = None) -> list[tuple[str, tuple[str, ...]]]
 
     rows = sheet.iter_rows(values_only=True)
     header = [str(c or "").strip().lower() for c in next(rows, ())]
+    if not any(header):
+        return [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
     if "keyword" not in header:
         raise ValueError(f"{path.name}: the Keywords sheet needs a 'Keyword' column")
     kw_col = header.index("keyword")
@@ -282,7 +287,7 @@ def load_keywords(path: Path | None = None) -> list[tuple[str, tuple[str, ...]]]
         raw = str(row[mp_col] or "") if mp_col is not None and mp_col < len(row) else ""
         wanted = tuple(m for m in MARKETPLACES if m in raw.lower()) or MARKETPLACES
         out.append((keyword, wanted))
-    return out
+    return out or [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
 
 
 def search_due(last: datetime | None, now: datetime | None = None) -> bool:
