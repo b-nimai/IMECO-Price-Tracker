@@ -69,12 +69,33 @@ class Cell:
     via: Via = Via.NONE
     note: str | None = None
     """Human-readable detail for a non-OK status. Surfaced in the dashboard tooltip."""
+    rating: float | None = None
+    """Average star rating, 0-5, as THIS listing shows it. Amazon and Flipkart only."""
+    rating_count: int | None = None
+    """How many ratings that average is over. None when the page did not say."""
 
     def __post_init__(self) -> None:
         # The invariant that makes the whole status vocabulary trustworthy. If this ever fires,
         # an adapter has reported success without actually finding a number.
         if self.status is Status.OK and self.price is None:
             raise ValueError(f"{self.marketplace}: status=ok requires a price")
+
+
+@dataclass
+class LocationCheck:
+    """One Blinkit listing as ONE dark store answers it.
+
+    The board's cell keeps asking "is this live anywhere, and at what price" (see
+    `run._fetch_blinkit`). These rows answer the question the board cannot: WHERE it is live.
+    Written to `availability_checks`, never to `price_snapshots`.
+    """
+
+    sku: str
+    city: str
+    area: str
+    lat: float
+    lon: float
+    cell: Cell
 
 
 @dataclass

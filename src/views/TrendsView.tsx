@@ -1,6 +1,7 @@
-import { ArrowDown, ArrowUp, Search, TriangleAlert } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, TriangleAlert } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
 
+import { FilterBox, SchemaNote, Where } from '@/components/listing';
 import { PriceChart, type Series } from '@/components/PriceChart';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,13 +14,8 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatPct, formatPrice } from '@/data/format';
-import {
-  CONFIGURED,
-  fetchHistory,
-  fetchPriceStats,
-  type HistoryRow,
-  type PriceStatsRow,
-} from '@/data/supabaseClient';
+import { CONFIGURED, fetchHistory, fetchPriceStats, type PriceStatsRow } from '@/data/supabaseClient';
+import { isMissingView, useRemote } from '@/hooks/useRemote';
 import {
   MARKETPLACE_COLORS,
   MARKETPLACE_LABELS,
@@ -29,67 +25,11 @@ import {
   type Marketplace,
   type Row,
 } from '@/data/types';
-import { cn } from '@/lib/utils';
+import { byName, cn } from '@/lib/utils';
 
 const RANGES = [7, 30, 90] as const;
 type Range = (typeof RANGES)[number];
 const DAY = 86_400_000;
-
-/** One async result, tagged with what it was fetched for so a stale answer is never shown. */
-interface Loaded<T> {
-  key: string;
-  at: number;
-  data: T | null;
-  error: string | null;
-}
-
-function message(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function useHistory(sku: string | null, days: Range) {
-  const key = sku ? `${sku}|${days}` : '';
-  const [state, setState] = useState<Loaded<HistoryRow[]> | null>(null);
-
-  useEffect(() => {
-    if (!sku || !CONFIGURED) return;
-    let live = true;
-    fetchHistory(sku, days).then(
-      (data) => live && setState({ key, at: Date.now(), data, error: null }),
-      (err) => live && setState({ key, at: Date.now(), data: null, error: message(err) }),
-    );
-    return () => {
-      live = false;
-    };
-  }, [key, sku, days]);
-
-  return state?.key === key ? state : null;
-}
-
-function useStats() {
-  const [state, setState] = useState<Loaded<Map<string, PriceStatsRow>> | null>(null);
-
-  useEffect(() => {
-    if (!CONFIGURED) return;
-    let live = true;
-    fetchPriceStats().then(
-      (rows) =>
-        live &&
-        setState({
-          key: '',
-          at: Date.now(),
-          data: new Map(rows.map((r) => [`${r.sku}:${r.marketplace}`, r])),
-          error: null,
-        }),
-      (err) => live && setState({ key: '', at: Date.now(), data: null, error: message(err) }),
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  return state;
-}
 
 /**
  * Where the live price sits against the sheet's intended SP.
@@ -260,19 +200,6 @@ function AllTime({ row, stats }: { row: Row; stats: Map<string, PriceStatsRow> |
   );
 }
 
-function Where({ marketplace }: { marketplace: Marketplace }) {
-  return (
-    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-      <span
-        className="inline-block size-2 rounded-full"
-        style={{ background: MARKETPLACE_COLORS[marketplace] }}
-        aria-hidden
-      />
-      {MARKETPLACE_LABELS[marketplace]}
-    </span>
-  );
-}
-
 export default function TrendsView({ rows }: { rows: Row[] }) {
   const ordered = useMemo(() => sheetOrder(rows), [rows]);
   const [sku, setSku] = useState<string | null>(null);
@@ -289,8 +216,16 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
   // The sheet's SP columns are optional; with none filled in, target lines are noise.
   const hasTargets = ordered.some((r) => MARKETPLACES.some((m) => r.cells[m].targetSp));
 
-  const history = useHistory(selected?.sku ?? null, days);
-  const stats = useStats();
+  const history = useRemote(fetchHistory, selected?.sku ?? null, days);
+  const statsRemote = useRemote(fetchPriceStats);
+  const stats = useMemo(
+    () =>
+      statsRemote && {
+        error: statsRemote.error,
+        data: statsRemote.data && new Map(statsRemote.data.map((r) => [`${r.sku}:${r.marketplace}`, r])),
+      },
+    [statsRemote],
+  );
 
   const chart = useMemo(() => {
     if (!selected || !history?.data) return null;
@@ -304,10 +239,7 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
     return { series, from: history.at - days * DAY, to: history.at };
   }, [selected, history, days]);
 
-  const visible = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    return q ? ordered.filter((r) => r.name.toLowerCase().includes(q)) : ordered;
-  }, [ordered, filter]);
+  const visible = useMemo(() => byName(ordered, filter), [ordered, filter]);
 
   if (!CONFIGURED) {
     return (
@@ -379,24 +311,14 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
             <CardTitle className="text-sm tracking-widest text-muted-foreground uppercase">
               All products · last 30 days
             </CardTitle>
-            {stats?.error && (
-              <p className="mt-1 text-xs text-amber-400">
-                Ranges and change counts need the <code>price_stats</code> view — run{' '}
-                <code>supabase/schema.sql</code> in the Supabase SQL editor.
-              </p>
-            )}
+            {stats?.error &&
+              (isMissingView(stats.error) ? (
+                <SchemaNote view="price_stats" />
+              ) : (
+                <p className="mt-1 text-xs text-destructive">{stats.error.slice(0, 120)}</p>
+              ))}
           </div>
-          <label className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5">
-            <Search className="size-4 text-muted-foreground" aria-hidden />
-            <span className="sr-only">Filter products</span>
-            <input
-              type="search"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter products"
-              className="w-full min-w-0 bg-transparent sm:w-56 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-            />
-          </label>
+          <FilterBox value={filter} onChange={setFilter} />
         </CardHeader>
         <CardContent>
           <Table>

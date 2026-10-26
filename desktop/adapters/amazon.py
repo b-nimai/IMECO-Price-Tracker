@@ -64,6 +64,27 @@ _UNAVAILABLE_TEXT = re.compile(
     r"(?:Currently unavailable|We don't know when or if this item|not available)", re.I
 )
 
+# ── Rating ──────────────────────────────────────────────────────────────────────────────
+# `acrPopover` / `acrCustomerReviewText` are the rating widget under the product title — this
+# ASIN's own. NOT `a-icon-alt` "4.2 out of 5 stars": that text is on every recommendation tile
+# too (a page carries ten or more of them, with different values).
+_RATING = re.compile(r'id="acrPopover"[^>]*?title="([\d.]+) out of 5 stars"')
+_RATING_COUNT = re.compile(r'id="acrCustomerReviewText"[^>]*?aria-label="([\d,]+) [A-Za-z ]*"')
+
+
+def rating(html: str) -> tuple[float | None, int | None]:
+    """(average stars, number of ratings) for this listing, or Nones when it has none yet."""
+    stars = None
+    m = _RATING.search(html)
+    if m:
+        value = float(m.group(1))
+        stars = value if 0 < value <= 5 else None
+    count = None
+    m = _RATING_COUNT.search(html)
+    if m:
+        count = int(m.group(1).replace(",", ""))
+    return stars, count
+
 
 def _buybox_price(html: str) -> float | None:
     """The price for THIS ASIN, or None if the page is not offering one."""
@@ -96,6 +117,12 @@ def _is_unavailable(html: str) -> bool:
 
 
 def parse(html: str, url: str) -> Cell:
+    cell = _parse(html, url)
+    cell.rating, cell.rating_count = rating(html)
+    return cell
+
+
+def _parse(html: str, url: str) -> Cell:
     price = _buybox_price(html)
 
     mrp = None

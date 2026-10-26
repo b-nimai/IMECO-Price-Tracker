@@ -3,6 +3,7 @@
     python -m desktop.run                 # scrape and store
     python -m desktop.run --dry-run       # scrape, print, store nothing
     python -m desktop.run --source scheduled
+    python -m desktop.run --all-stores    # also check every Blinkit dark store, whatever the hour
 
 Hosts run in parallel; listings within a host run sequentially behind the throttle in
 `fetch.py`. That shape is the point — it keeps per-host request rates polite while still
@@ -22,12 +23,26 @@ from pathlib import Path
 
 from .adapters import PARSERS
 from .catalogue import load_products
-from .config import load_settings
+from .config import Settings, load_settings
 from .fetch import BLINKIT_LOCATIONS, Fetcher
-from .models import MARKETPLACES, Cell, Product, Status, Via
+from .models import MARKETPLACES, Cell, LocationCheck, Product, Status, Via
 
 ProgressFn = Callable[[str, int, int], None]
 """(marketplace, done, total) — called after each listing so the GUI can draw a bar."""
+
+#: Every this many hours, a run asks EVERY Blinkit dark store about every listing instead of
+#: stopping at the first with stock. That full walk is ~6x the Blinkit requests (~11 minutes
+#: behind the throttle for 17 listings), which is fine a few times a day and wasteful hourly —
+#: which store has stock does not change minute to minute.
+ALL_STORES_EVERY_HOURS = 3
+
+
+def all_stores_due(now: datetime | None = None) -> bool:
+    """Whether this run should do the full dark-store walk. On the hour 0, 3, 6, ... 21 —
+    clock-based rather than "since the last walk" so it needs no state, and an hourly schedule
+    over a working day hits 9, 12, 15 and 18."""
+    now = now or datetime.now()
+    return now.hour % ALL_STORES_EVERY_HOURS == 0
 
 
 def _fetch_one(
@@ -60,7 +75,12 @@ def _fetch_one(
     )
 
 
-def _fetch_blinkit(url: str, fetcher: Fetcher) -> Cell:
+def _fetch_blinkit(
+    url: str,
+    fetcher: Fetcher,
+    sku: str = "",
+    checks: list[LocationCheck] | None = None,
+) -> Cell:
     """Ask Blinkit for one listing, trying each location until one has it in stock.
 
     Blinkit answers per DARK STORE, so "out of stock" from a single point means only that ONE
@@ -73,19 +93,43 @@ def _fetch_blinkit(url: str, fetcher: Fetcher) -> Cell:
     request. Only genuinely unavailable listings pay for the full walk. If none has stock, the
     FIRST location's answer is kept — the home store is the honest thing to report as
     unavailable, and it carries the real price the item returns at.
+
+    With `checks`, it does NOT stop: every location is asked and each answer is appended there,
+    for the Availability tab. The cell returned is chosen exactly as above, so the board reads
+    the same whichever way the walk was done.
     """
     first: Cell | None = None
+    found: Cell | None = None
+    home = BLINKIT_LOCATIONS[0].city
 
-    for city, context in BLINKIT_LOCATIONS:
-        cell = _fetch_one("blinkit", url, fetcher, context)
+    for location in BLINKIT_LOCATIONS:
+        cell = _fetch_one("blinkit", url, fetcher, location.context)
+        if checks is not None:
+            checks.append(
+                LocationCheck(
+                    sku=sku,
+                    city=location.city,
+                    area=location.area,
+                    lat=float(location.context["lat"]),
+                    lon=float(location.context["lon"]),
+                    # A copy: the board's cell gets a note added below, which is about the
+                    # board's choice and does not belong on this store's own reading.
+                    cell=Cell(**vars(cell)),
+                )
+            )
         if first is None:
             first = cell
-        if cell.status is Status.OK:
+        if found is None and cell.status is Status.OK:
             # Say where it came from whenever that is not the home market, so a Bengaluru price
             # on the wall is never read as one a Kolkata customer can pay.
-            if city != BLINKIT_LOCATIONS[0][0]:
-                cell.note = f"in stock in {city}; not in {BLINKIT_LOCATIONS[0][0]}"
-            return cell
+            if location.city != home:
+                cell.note = f"in stock in {location.city}; not in {home}"
+            found = cell
+            if checks is None:
+                return cell
+
+    if found is not None:
+        return found
 
     assert first is not None  # BLINKIT_LOCATIONS is never empty
     # Only if the adapter had nothing more specific to say. "no store is carrying it" is a
@@ -94,7 +138,7 @@ def _fetch_blinkit(url: str, fetcher: Fetcher) -> Cell:
         # Deduplicated, order preserved: several of these points are different dark stores in
         # the SAME city, and "out of stock in Kolkata, Kolkata, Kolkata, Kolkata, Bengaluru,
         # Mumbai" reads as a bug in the app rather than a fact about the product.
-        cities = list(dict.fromkeys(c for c, _ in BLINKIT_LOCATIONS))
+        cities = list(dict.fromkeys(loc.city for loc in BLINKIT_LOCATIONS))
         first.note = "out of stock in " + ", ".join(cities)
     return first
 
@@ -104,6 +148,7 @@ def _scrape_marketplace(
     products: list[Product],
     fetcher: Fetcher,
     on_progress: ProgressFn | None,
+    checks: list[LocationCheck] | None = None,
 ) -> list[tuple[str, Cell]]:
     listed = [p for p in products if p.url_for(marketplace)]
     total = len(listed)
@@ -112,7 +157,7 @@ def _scrape_marketplace(
     for i, product in enumerate(listed, start=1):
         url = product.url_for(marketplace) or ""
         if marketplace == "blinkit":
-            cell = _fetch_blinkit(url, fetcher)
+            cell = _fetch_blinkit(url, fetcher, product.sku, checks)
         else:
             cell = _fetch_one(marketplace, url, fetcher)
 
@@ -127,15 +172,20 @@ def scrape(
     products: list[Product],
     fetcher: Fetcher,
     on_progress: ProgressFn | None = None,
+    checks: list[LocationCheck] | None = None,
 ) -> list[tuple[str, Cell]]:
-    """Fetch every listed product on every marketplace."""
+    """Fetch every listed product on every marketplace.
+
+    Pass a `checks` list to also ask every Blinkit dark store (see `_fetch_blinkit`); it is
+    filled in place.
+    """
     results: list[tuple[str, Cell]] = []
 
     # One worker per marketplace. Any more would not help — the throttle serialises each host
     # anyway — and any fewer would leave hosts idle.
     with ThreadPoolExecutor(max_workers=len(MARKETPLACES)) as pool:
         futures = [
-            pool.submit(_scrape_marketplace, m, products, fetcher, on_progress)
+            pool.submit(_scrape_marketplace, m, products, fetcher, on_progress, checks)
             for m in MARKETPLACES
         ]
         for future in futures:
@@ -206,6 +256,8 @@ def write_fixture(path: Path, products: list[Product], results: list[tuple[str, 
                 "status": cell.status.value,
                 "via": cell.via.value,
                 "note": cell.note,
+                "rating": cell.rating,
+                "rating_count": cell.rating_count,
                 "checked_at": checked_at,
             }
             for sku, cell in results
@@ -213,6 +265,36 @@ def write_fixture(path: Path, products: list[Product], results: list[tuple[str, 
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+
+
+def store_results(
+    settings: Settings,
+    products: list[Product],
+    results: list[tuple[str, Cell]],
+    checks: list[LocationCheck] | None,
+    source: str,
+) -> tuple[str, int, str | None]:
+    """Write one finished scrape. Shared by the console and the GUI so the two cannot drift.
+
+    Returns (run_id, snapshots written, warning). The dark-store rows are written BEFORE the
+    run is closed, so the dashboard never sees a finished run without them — but a failure to
+    write them is only a warning: they are the Availability tab's extra detail, and must never
+    cost the board its prices.
+    """
+    from .store import Store
+
+    warning = None
+    with Store(settings) as store:
+        store.sync_products(products)
+        run_id = store.start_run(source)
+        written = store.save_snapshots(run_id, results)
+        if checks:
+            try:
+                store.save_availability(run_id, checks)
+            except RuntimeError as exc:
+                warning = f"dark-store checks not stored — run supabase/schema.sql? ({exc})"
+        store.finish_run(run_id, [c for _, c in results])
+    return run_id, written, warning
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -224,6 +306,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="also write the results as a demo JSON file the dashboard can render "
         "without a database (used for public/demo-prices.json)",
+    )
+    parser.add_argument(
+        "--all-stores",
+        action="store_true",
+        help=f"ask every Blinkit dark store this run (otherwise every {ALL_STORES_EVERY_HOURS}h)",
     )
     args = parser.parse_args(argv)
 
@@ -245,8 +332,12 @@ def main(argv: list[str] | None = None) -> int:
         args.dry_run = True
     print()
 
+    checks: list[LocationCheck] | None = [] if args.all_stores or all_stores_due() else None
+    if checks is not None:
+        print(f"checking all {len(BLINKIT_LOCATIONS)} Blinkit dark stores this run")
+
     with Fetcher(settings) as fetcher:
-        results = scrape(products, fetcher)
+        results = scrape(products, fetcher, checks=checks)
 
     elapsed = time.monotonic() - started
     for marketplace in MARKETPLACES:
@@ -263,14 +354,10 @@ def main(argv: list[str] | None = None) -> int:
         print("dry run — nothing written to Supabase")
         return 0
 
-    from .store import Store
-
-    with Store(settings) as store:
-        store.sync_products(products)
-        run_id = store.start_run(args.source)
-        written = store.save_snapshots(run_id, results)
-        store.finish_run(run_id, [c for _, c in results])
+    run_id, written, warning = store_results(settings, products, results, checks, args.source)
     print(f"\nstored {written} snapshots (run {run_id})")
+    if checks:
+        print(f"stored {len(checks)} dark-store checks" if not warning else f"  ! {warning}")
     return 0
 
 

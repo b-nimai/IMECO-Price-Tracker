@@ -37,6 +37,38 @@ _UNAVAILABLE = re.compile(
     r"(?:Currently Out of Stock|Sold Out|This item is unavailable|>Notify Me<)", re.I
 )
 
+# The product's own rating sits in its `psi` tracking block, keyed by the FSN — the `pid` in the
+# URL:  "psi":{"fsn":"KNRHKDXNWEFBN2GG", ..., "pr":{"individualRatingsCount":[...],
+# "rating":4.6,"ratingsCount":416,"reviewsCount":189}
+# Keying on the FSN is what keeps recommendation tiles out: a page carries a dozen other
+# `"rating":` values. Checked against the page's own JSON-LD where it has one (4.5 / 2165, match).
+_PID = re.compile(r"[?&]pid=([A-Z0-9]+)")
+_PR = re.compile(r'"pr"\s*:\s*\{')
+_STARS = re.compile(r'"rating"\s*:\s*([\d.]+)')
+_COUNT = re.compile(r'"ratingsCount"\s*:\s*(\d+)')
+
+
+def rating(html: str, url: str) -> tuple[float | None, int | None]:
+    """(average stars, number of ratings) for this listing, or Nones when it has none yet."""
+    pid = _PID.search(url)
+    if not pid:
+        return None, None
+    at = html.find(f'"fsn":"{pid.group(1)}"')
+    while at != -1:
+        window = html[at : at + 900]
+        pr = _PR.search(window)
+        if pr:
+            body = window[pr.end() :]
+            stars = _STARS.search(body)
+            count = _COUNT.search(body)
+            value = float(stars.group(1)) if stars else None
+            return (
+                value if value is not None and 0 < value <= 5 else None,
+                int(count.group(1)) if count else None,
+            )
+        at = html.find(f'"fsn":"{pid.group(1)}"', at + 1)
+    return None, None
+
 
 def _from_ppd(html: str) -> tuple[float | None, float | None]:
     m = _PPD.search(html)
@@ -47,6 +79,12 @@ def _from_ppd(html: str) -> tuple[float | None, float | None]:
 
 
 def parse(html: str, url: str) -> Cell:
+    cell = _parse(html, url)
+    cell.rating, cell.rating_count = rating(html, url)
+    return cell
+
+
+def _parse(html: str, url: str) -> Cell:
     price, mrp = _from_ppd(html)
 
     if price is None:

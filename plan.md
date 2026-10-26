@@ -10,9 +10,10 @@ original build checklist; this file tracks everything added on top of it.
 | ✅ | **Done** — live on https://imeco-price-tracker.vercel.app/ (or in the shipped `.exe`) |
 | 🟡 | **Working** — built and tested locally, not yet deployed / committed |
 | ⬜ | **To do** |
+| ⏸ | **Skipped for now** — not needed yet; can be picked up later |
 | ❌ | Dropped, with the reason |
 
-**Progress: 2 done · 0 working · 7 to do** (by phase)
+**Progress: 2 done · 2 working · 3 to do · 1 skipped** (by phase)
 
 ---
 
@@ -24,7 +25,7 @@ e-commerce and quick commerce. What it sells, and what we already have:
 | 42signals module | What it does | Us today |
 |---|---|---|
 | Price monitoring / MAP & sellers | Per-SKU prices across marketplaces and sellers, breach alerts, screenshot evidence | ✅ Hourly prices for Amazon, Flipkart, Blinkit |
-| Price alerts / guardrails | Telegram, WhatsApp, email alerts on thresholds | ⬜ Phase 2 |
+| Price alerts / guardrails | Telegram, WhatsApp, email alerts on thresholds | ⏸ Phase 2 — skipped for now |
 | Product availability | In-stock by pincode / dark store, stockout patterns, OOS alerts | Partly — Blinkit checked at 6 dark stores, only "anywhere in stock?" kept |
 | Share of search | Daily keyword rank, organic vs sponsored, brand share of top results | ⬜ Phase 6 |
 | Competitor analysis | Competitor SKUs beside yours, price benchmarking | ⬜ Phase 5 |
@@ -43,7 +44,8 @@ All four feature areas plus competitor tracking were chosen.
 - The wall display (Prices tab) must look and behave exactly as before.
 - Commits carry **no co-author line**.
 
-**Recommended order:** 0 → 1 → 2 → 5 → 3 → 4 → 6 → 7. Phases 0–1 are dashboard-only (Vercel
+**Order:** 0 → 1 → ~~2~~ → 3 → 4 → 5 → 6 → 7. Phase 2 skipped for now; 3 and 4 moved ahead of 5 because
+they need nothing from you. Phases 0–1 are dashboard-only (Vercel
 deploy). Phases 2–6 change the desktop app and need `./desktop/build-remote.sh` after.
 
 ---
@@ -81,7 +83,11 @@ Dashboard + one SQL view · no `.exe` rebuild
 - [x] Commit + push → Vercel deploy, confirmed live (`17c8a81`, 26 Oct)
 - [ ] Fill in the SP (target price) columns in the sheet so "vs target" lights up *(you)*
 
-## Phase 2 — Alerts  ⬜ To do
+## Phase 2 — Alerts  ⏸ Skipped for now
+
+> Not needed right now (decided 26 Oct 2026). Nothing below is built. The dashboard's "Spread
+> now" amber gap and the out-of-stock labels cover the same ground for anyone looking at it.
+> Pick this up if someone needs to be told without opening the dashboard.
 
 Desktop app · needs `.exe` rebuild
 
@@ -99,32 +105,47 @@ Desktop app · needs `.exe` rebuild
 - [ ] Alerts feed on the dashboard (last 50)
 - [ ] Rebuild `.exe`, force a test alert, confirm it arrives once and not again
 
-## Phase 3 — Availability analytics  ⬜ To do
+## Phase 3 — Availability analytics  🟡 Working
 
-Desktop app · needs `.exe` rebuild
+Desktop app + dashboard · needs `.exe` rebuild
 
-- [ ] Record **every** Blinkit location's answer (today `_fetch_blinkit` stops at the first in
-      stock) into a new `availability_checks` table — `price_snapshots` stays as is
-- [ ] Full location walk on a slower cadence (e.g. every 3 h) to keep runs short
-- [ ] Optional "Locations" sheet tab (pincode / lat / lon) — add Delhi, Hyderabad, …
-- [ ] `availability_daily` view — in-stock %, longest OOS streak, current OOS duration
-- [ ] **Availability** tab — in-stock % per marketplace (7d / 30d), SKU × location grid,
-      "out of stock longest" ranking, stockout timeline
+- [x] Every Blinkit dark store's answer recorded in a new `availability_checks` table — the
+      board's cell and `price_snapshots` unchanged (`desktop/run.py` `_fetch_blinkit`)
+- [x] Full walk every 3 h (on the hour 0, 3, 6 … 21; `--all-stores` forces it), the quick
+      "stop at the first store with stock" walk otherwise — ~11 extra minutes on those runs
+- [x] Each store named by area — Dum Dum, Ballygunge, Behala, Salt Lake, Bengaluru, Mumbai
+      (`desktop/fetch.py` `BLINKIT_LOCATIONS`)
+- [x] Tested live on 2 listings: one in stock everywhere except Mumbai, one out everywhere
+- [x] `availability_stats` view — in-stock % (7d / 30d), current state and since when, from the
+      hourly readings already stored, so Amazon / Flipkart / Blinkit fill in straight away
+- [x] `blinkit_store_stats` view — each store's latest answer and 7-day in-stock %
+- [x] Schema tested on a local PostgreSQL: applies on top of the live schema, re-runnable,
+      anon can read and cannot write
+- [x] **Availability** tab — in-stock % per marketplace, per-product stock with "since",
+      "longest out of stock" sort, Blinkit product × dark-store grid
+- [ ] Run the updated `supabase/schema.sql` in Supabase *(you)*
+- [ ] Commit + push, rebuild `.exe` (`./desktop/build-remote.sh`), install it on the PC
+- [ ] Confirm the first full walk lands (next run at 9 / 12 / 3 / 6 o'clock)
+- [ ] *Later:* optional "Locations" sheet tab to add cities (Delhi, Hyderabad, …)
 - ❌ Lost-revenue estimate — needs sales data we don't have
 
-## Phase 4 — Ratings & reviews  ⬜ To do
+## Phase 4 — Ratings & reviews  🟡 Working
 
-Desktop app · needs `.exe` rebuild
+Desktop app + dashboard · needs `.exe` rebuild
 
-- [ ] Amazon + Flipkart adapters also extract `rating` and `review_count` from the pages
-      already fetched (Blinkit has no reviews)
-- [ ] `rating`, `review_count` columns on `price_snapshots`; mirror in `models.py` / `types.ts`
-- [ ] Parser tests against saved pages
-- [ ] **Reviews** tab — rating and count per listing, 30-day trend, "rating dropped" flag
-- [ ] Rating-drop alert *(wires into Phase 2)*
-- [ ] *Optional later:* review snippets → sentiment + themes via Claude API (Haiku), stored in a
-      `reviews` table. Needs an Anthropic API key; Amazon's full review pages need login, so
-      check feasibility first.
+- [x] Amazon reads the product's own rating widget (`acrPopover`), not the recommendation tiles
+- [x] Flipkart reads the rating keyed by the product id in the URL — matches the page's own
+      structured data where it has one (4.5 / 2,165)
+- [x] Tested on 8 live pages, in stock and out of stock: all correct
+- [x] `rating`, `rating_count` on `price_snapshots`; `models.py` / `store.py` updated — a database
+      without the columns still gets its prices (ratings dropped, run not failed)
+- [x] `rating_trend` view — latest rating vs. 30 days ago, ratings added
+- [x] **Reviews** tab — average rating per marketplace, per-product ★ and count, "▼0.1 since …"
+      flag for drops, "lowest rated first" sort
+- [ ] Run the updated `supabase/schema.sql` *(you — same step as Phase 3)*
+- [ ] Commit + push, rebuild `.exe`, confirm ratings appear after the first run
+- [ ] *Optional later:* review text → sentiment + themes via Claude API (needs an API key;
+      Amazon's full review pages need login, so check feasibility first)
 
 ## Phase 5 — Competitor SKUs  ⬜ To do
 
@@ -184,4 +205,6 @@ Desktop app + sheet · needs `.exe` rebuild
 | 26 Oct 2026 | 42signals researched, plan agreed. Phases 0–1 built and tested locally. `price_stats` view run in Supabase. |
 | 26 Oct 2026 | Trends tab redesigned for readability: one row per product instead of one per listing. |
 | 26 Oct 2026 | Seller view: "Best now" (lowest = buyer's view) replaced by **Spread now** — high vs low channel and the gap %, amber at 20 %+; "Lowest ever" became an all-time range. Chart gets a plain-words summary per marketplace, price labels on the lines, and opens on 30 days. |
-| 26 Oct 2026 | Phases 0–1 shipped — `17c8a81`, live on Vercel. Next: Phase 2 (Telegram alerts). |
+| 26 Oct 2026 | Phases 0–1 shipped — `17c8a81`, live on Vercel. |
+| 26 Oct 2026 | Phase 2 (alerts) skipped for now — not needed yet. |
+| 26 Oct 2026 | Phases 3–4 built and tested: dark-store walk, ratings, Availability + Reviews tabs. Waiting on schema run + `.exe` rebuild. |

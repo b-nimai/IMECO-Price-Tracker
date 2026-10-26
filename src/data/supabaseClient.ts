@@ -159,6 +159,68 @@ export async function fetchPriceStats(): Promise<PriceStatsRow[]> {
   );
 }
 
+// ── availability & ratings (their tabs) ─────────────────────────────────────────────────
+// Views in supabase/schema.sql, each one row per listing. Same on-demand rule as history.
+
+export interface AvailabilityRow {
+  sku: string;
+  marketplace: string;
+  status_now: 'ok' | 'out_of_stock';
+  checks_7d: number;
+  in_stock_7d: number;
+  checks_30d: number;
+  in_stock_30d: number;
+  /** First reading of the current state inside the last 30 days. */
+  status_since: string;
+  /** No change at all in 30 days — `status_since` is then just where the window starts. */
+  unchanged_30d: boolean;
+}
+
+export async function fetchAvailability(): Promise<AvailabilityRow[]> {
+  return get<AvailabilityRow[]>(
+    'availability_stats?select=sku,marketplace,status_now,checks_7d,in_stock_7d,checks_30d,in_stock_30d,status_since,unchanged_30d',
+    'availability_stats',
+  );
+}
+
+export interface StoreRow {
+  sku: string;
+  area: string;
+  city: string;
+  status_now: string;
+  price_now: number | null;
+  checked_at: string;
+  checks_7d: number;
+  in_stock_7d: number;
+}
+
+/** Each Blinkit dark store's latest answer per listing — the `blinkit_store_stats` view. */
+export async function fetchBlinkitStores(): Promise<StoreRow[]> {
+  return get<StoreRow[]>(
+    'blinkit_store_stats?select=sku,area,city,status_now,price_now,checked_at,checks_7d,in_stock_7d',
+    'blinkit_store_stats',
+  );
+}
+
+export interface RatingRow {
+  sku: string;
+  marketplace: string;
+  rating: number;
+  rating_count: number | null;
+  checked_at: string;
+  /** Earliest rating inside the last 30 days, for the change. */
+  rating_then: number | null;
+  count_then: number | null;
+  then_at: string | null;
+}
+
+export async function fetchRatings(): Promise<RatingRow[]> {
+  return get<RatingRow[]>(
+    'rating_trend?select=sku,marketplace,rating,rating_count,checked_at,rating_then,count_then,then_at',
+    'rating_trend',
+  );
+}
+
 // ── localStorage ────────────────────────────────────────────────────────────────────────
 // A reload inside the TTL paints from disk with zero network. The scrape lands once an hour,
 // so a two-minute cache costs nothing in freshness.

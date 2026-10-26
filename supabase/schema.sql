@@ -74,6 +74,39 @@ create index if not exists price_snapshots_latest_idx
 
 create index if not exists price_snapshots_run_idx on price_snapshots (run_id);
 
+-- MIGRATION: star ratings, read from the product pages already fetched (Amazon, Flipkart).
+-- Nullable — Blinkit shows none, a new listing has none yet, and every row written before
+-- these existed has none.
+alter table price_snapshots add column if not exists rating numeric
+  check (rating is null or (rating > 0 and rating <= 5));
+alter table price_snapshots add column if not exists rating_count integer
+  check (rating_count is null or rating_count >= 0);
+
+-- Every Blinkit dark store's answer for every listing, from the full walk the desktop app does
+-- every few hours (run.ALL_STORES_EVERY_HOURS). The board's cell answers "is it live anywhere";
+-- these rows answer WHERE. Kept apart from price_snapshots so latest_prices, and with it the
+-- wall display, is untouched by them.
+create table if not exists availability_checks (
+  id          bigserial primary key,
+  run_id      uuid not null references runs(id) on delete cascade,
+  sku         text not null references products(sku) on delete cascade,
+  marketplace text not null default 'blinkit' check (marketplace in ('blinkit')),
+  city        text not null,
+  area        text not null,           -- the dark store's neighbourhood, e.g. "Dum Dum"
+  lat         numeric not null,
+  lon         numeric not null,
+  status      text not null
+                check (status in ('ok','not_listed','out_of_stock','blocked','error')),
+  price       numeric,
+  note        text,
+  checked_at  timestamptz not null default now(),
+  constraint ok_requires_price check (status <> 'ok' or price is not null)
+);
+
+create index if not exists availability_checks_latest_idx
+  on availability_checks (sku, area, checked_at desc);
+create index if not exists availability_checks_run_idx on availability_checks (run_id);
+
 -- ── What the dashboard reads ────────────────────────────────────────────────────────────
 
 -- One row per SKU x marketplace, most recent first. The SPA fetches this rather than the raw
@@ -114,6 +147,84 @@ create or replace view price_stats
   from priced
   group by sku, marketplace;
 
+-- In-stock share per listing over the last 7 and 30 days, from the hourly readings, plus how
+-- long the CURRENT state has lasted. Only `ok` and `out_of_stock` readings count: a blocked or
+-- failed fetch says nothing about stock, and counting it either way would make a bad scrape
+-- night look like a stockout.
+create or replace view availability_stats
+  with (security_invoker = on) as
+  with readings as (
+    select sku, marketplace, status, checked_at
+    from price_snapshots
+    where status in ('ok', 'out_of_stock') and checked_at >= now() - interval '30 days'
+  ),
+  latest as (
+    select distinct on (sku, marketplace) sku, marketplace, status
+    from readings
+    order by sku, marketplace, checked_at desc
+  ),
+  -- The newest reading in the OTHER state: the current state began just after it.
+  flipped as (
+    select r.sku, r.marketplace, max(r.checked_at) as last_other
+    from readings r
+    join latest l on l.sku = r.sku and l.marketplace = r.marketplace
+    where r.status <> l.status
+    group by r.sku, r.marketplace
+  )
+  select l.sku, l.marketplace,
+         l.status                                                                  as status_now,
+         count(*) filter (where r.checked_at >= now() - interval '7 days')         as checks_7d,
+         count(*) filter (where r.checked_at >= now() - interval '7 days'
+                            and r.status = 'ok')                                    as in_stock_7d,
+         count(*)                                                                   as checks_30d,
+         count(*) filter (where r.status = 'ok')                                    as in_stock_30d,
+         min(r.checked_at) filter (where f.last_other is null
+                                      or r.checked_at > f.last_other)               as status_since,
+         f.last_other is null                                                       as unchanged_30d
+  from latest l
+  join readings r on r.sku = l.sku and r.marketplace = l.marketplace
+  left join flipped f on f.sku = l.sku and f.marketplace = l.marketplace
+  group by l.sku, l.marketplace, l.status, f.last_other;
+
+-- Each Blinkit dark store's latest answer per listing, and its in-stock share over 7 days.
+create or replace view blinkit_store_stats
+  with (security_invoker = on) as
+  select sku, area, city,
+         (array_agg(status order by checked_at desc))[1]          as status_now,
+         (array_agg(price  order by checked_at desc))[1]          as price_now,
+         max(checked_at)                                          as checked_at,
+         count(*) filter (where status in ('ok', 'out_of_stock')) as checks_7d,
+         count(*) filter (where status = 'ok')                    as in_stock_7d
+  from availability_checks
+  where checked_at >= now() - interval '7 days'
+  group by sku, area, city;
+
+-- Latest rating per listing, against the earliest one inside the last 30 days, so the Reviews
+-- tab can say "4.3, down from 4.4" and "+12 ratings".
+create or replace view rating_trend
+  with (security_invoker = on) as
+  with rated as (
+    select sku, marketplace, rating, rating_count, checked_at
+    from price_snapshots
+    where rating is not null
+  ),
+  latest as (
+    select distinct on (sku, marketplace) *
+    from rated
+    order by sku, marketplace, checked_at desc
+  )
+  select l.sku, l.marketplace, l.rating, l.rating_count, l.checked_at,
+         f.rating as rating_then, f.rating_count as count_then, f.checked_at as then_at
+  from latest l
+  left join lateral (
+    select r.rating, r.rating_count, r.checked_at
+    from rated r
+    where r.sku = l.sku and r.marketplace = l.marketplace
+      and r.checked_at >= now() - interval '30 days'
+    order by r.checked_at asc
+    limit 1
+  ) f on true;
+
 -- ── Row Level Security ──────────────────────────────────────────────────────────────────
 -- With RLS enabled and only SELECT policies defined, anon can read and nothing else.
 -- service_role bypasses RLS entirely, which is how the desktop app writes.
@@ -121,16 +232,21 @@ create or replace view price_stats
 alter table products        enable row level security;
 alter table runs            enable row level security;
 alter table price_snapshots enable row level security;
+alter table availability_checks enable row level security;
 
 drop policy if exists "public read products"  on products;
 drop policy if exists "public read runs"      on runs;
 drop policy if exists "public read snapshots" on price_snapshots;
+drop policy if exists "public read availability" on availability_checks;
 
 create policy "public read products"  on products        for select to anon, authenticated using (true);
 create policy "public read runs"      on runs            for select to anon, authenticated using (true);
 create policy "public read snapshots" on price_snapshots for select to anon, authenticated using (true);
+create policy "public read availability" on availability_checks for select to anon, authenticated using (true);
 
-grant select on products, runs, price_snapshots, latest_prices, price_stats to anon, authenticated;
+grant select on products, runs, price_snapshots, latest_prices, price_stats,
+                availability_checks, availability_stats, blinkit_store_stats, rating_trend
+  to anon, authenticated;
 
 -- ── Verification ────────────────────────────────────────────────────────────────────────
 -- Confirms no INSERT/UPDATE/DELETE policy was created by accident. Expect zero rows.

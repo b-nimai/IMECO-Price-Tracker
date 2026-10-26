@@ -23,6 +23,7 @@ import random
 import re
 import threading
 import time
+from typing import NamedTuple
 
 import httpx
 
@@ -93,21 +94,28 @@ HEADERS = {
 # leads because it recovered every one of them and is the operator's own location, so the board
 # now agrees with what they see in their own browser.
 #
-# The city labels are deliberately all "Kolkata": which dark store answered is our business, not
-# the board's, and `run.py` only annotates a price when the CITY differs from home.
-BLINKIT_LOCATIONS: tuple[tuple[str, dict[str, str]], ...] = (
+# The CITY labels are deliberately all "Kolkata": on the board, which dark store answered is our
+# business, and `run.py` only annotates a price when the CITY differs from home. The AREA is for
+# the Availability tab, which exists precisely to show which store has it.
+class BlinkitLocation(NamedTuple):
+    city: str
+    context: dict[str, str]
+    area: str
+
+
+BLINKIT_LOCATIONS: tuple[BlinkitLocation, ...] = (
     # Home. Overridable by env for anyone running this from another neighbourhood.
-    ("Kolkata", {"lat": os.environ.get("BLINKIT_LAT", "22.6420"),
-                 "lon": os.environ.get("BLINKIT_LON", "88.4212")}),   # Dum Dum
-    ("Kolkata", {"lat": "22.5250", "lon": "88.3650"}),                # Ballygunge
-    ("Kolkata", {"lat": "22.4986", "lon": "88.3140"}),                # Behala
-    ("Kolkata", {"lat": "22.5726", "lon": "88.4310"}),                # Salt Lake
-    ("Bengaluru", {"lat": "12.9716", "lon": "77.5946"}),
-    ("Mumbai", {"lat": "19.0760", "lon": "72.8777"}),
+    BlinkitLocation("Kolkata", {"lat": os.environ.get("BLINKIT_LAT", "22.6420"),
+                                "lon": os.environ.get("BLINKIT_LON", "88.4212")}, "Dum Dum"),
+    BlinkitLocation("Kolkata", {"lat": "22.5250", "lon": "88.3650"}, "Ballygunge"),
+    BlinkitLocation("Kolkata", {"lat": "22.4986", "lon": "88.3140"}, "Behala"),
+    BlinkitLocation("Kolkata", {"lat": "22.5726", "lon": "88.4310"}, "Salt Lake"),
+    BlinkitLocation("Bengaluru", {"lat": "12.9716", "lon": "77.5946"}, "Bengaluru"),
+    BlinkitLocation("Mumbai", {"lat": "19.0760", "lon": "72.8777"}, "Mumbai"),
 )
 
 _MARKETPLACE_HEADERS: dict[str, dict[str, str]] = {
-    "blinkit": BLINKIT_LOCATIONS[0][1],
+    "blinkit": BLINKIT_LOCATIONS[0].context,
 }
 
 #: Politeness window between two requests to the SAME host, seconds. Different hosts run in

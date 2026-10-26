@@ -27,8 +27,8 @@ from . import catalogue, schedule
 from .catalogue import load_products
 from .config import load_settings, save_setting
 from .fetch import Fetcher
-from .models import MARKETPLACES, Product, Status
-from .run import scrape
+from .models import MARKETPLACES, LocationCheck, Product, Status
+from .run import all_stores_due, scrape, store_results
 
 BG = "#111111"
 FG = "#f1f5f9"
@@ -189,16 +189,14 @@ class App:
             def progress(marketplace: str, done: int, total: int) -> None:
                 self.events.put(("progress", marketplace, done, total))
 
+            # The scheduled task runs the exe with --silent, which goes through run.main; this
+            # is the button. Both follow the same every-few-hours dark-store cadence.
+            checks: list[LocationCheck] | None = [] if all_stores_due() else None
+
             with Fetcher(settings) as fetcher:
-                results = scrape(products, fetcher, progress)
+                results = scrape(products, fetcher, progress, checks)
 
-            from .store import Store
-
-            with Store(settings) as store:
-                store.sync_products(products)
-                run_id = store.start_run(source)
-                store.save_snapshots(run_id, results)
-                store.finish_run(run_id, [c for _, c in results])
+            store_results(settings, products, results, checks, source)
 
             ok = sum(c.status is Status.OK for _, c in results)
             self.events.put(("done", ok, len(results)))

@@ -11,10 +11,17 @@ import { HeatmapView } from '@/views/HeatmapView';
 // Everything but the board is code-split: the wall display only ever shows Prices, and should
 // not download views it never opens.
 const TrendsView = lazy(() => import('@/views/TrendsView'));
+const AvailabilityView = lazy(() => import('@/views/AvailabilityView'));
+const ReviewsView = lazy(() => import('@/views/ReviewsView'));
 
-const TABS = ['prices', 'trends'] as const;
+const TABS = ['prices', 'trends', 'availability', 'reviews'] as const;
 type Tab = (typeof TABS)[number];
-const TAB_LABELS: Record<Tab, string> = { prices: 'Prices', trends: 'Trends' };
+const TAB_LABELS: Record<Tab, string> = {
+  prices: 'Prices',
+  trends: 'Trends',
+  availability: 'Availability',
+  reviews: 'Reviews',
+};
 
 /**
  * Shown whenever the dashboard is rendering the captured scrape instead of the database.
@@ -87,7 +94,9 @@ export function App() {
       ) : (
         <main className="animate-fade-in-up min-h-0 min-w-0 flex-1 lg:overflow-y-auto">
           <Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
-            <TrendsView rows={data.rows} />
+            {tab === 'trends' && <TrendsView rows={data.rows} />}
+            {tab === 'availability' && <AvailabilityView rows={data.rows} />}
+            {tab === 'reviews' && <ReviewsView rows={data.rows} />}
           </Suspense>
         </main>
       )}

@@ -15,7 +15,7 @@ from typing import Any
 import httpx
 
 from .config import Settings
-from .models import Cell, Product, Status
+from .models import Cell, LocationCheck, Product, Status
 from .tls import SSL_CONTEXT
 
 TIMEOUT = 60.0
@@ -142,7 +142,13 @@ class Store:
 
     def save_snapshots(self, run_id: str, results: list[tuple[str, Cell]]) -> int:
         """`results` is (sku, cell) pairs. Written in one request so the dashboard never
-        observes a partially-populated run."""
+        observes a partially-populated run.
+
+        `rating` / `rating_count` were added to the schema after this app shipped. A database
+        that has not had that migration applied is still written to, without them — the same
+        deliberate degradation as `position` in `sync_products`: a pending migration must cost
+        the ratings, never the prices.
+        """
         rows = [
             {
                 "run_id": run_id,
@@ -154,11 +160,47 @@ class Store:
                 "status": cell.status.value,
                 "via": cell.via.value,
                 "note": cell.note,
+                "rating": cell.rating,
+                "rating_count": cell.rating_count,
             }
             for sku, cell in results
         ]
         written = 0
         for i in range(0, len(rows), CHUNK):
-            self._post("price_snapshots", rows[i : i + CHUNK])
-            written += len(rows[i : i + CHUNK])
+            chunk = rows[i : i + CHUNK]
+            try:
+                self._post("price_snapshots", chunk)
+            except RuntimeError as exc:
+                if "rating" not in str(exc):
+                    raise
+                for row in rows:
+                    row.pop("rating", None)
+                    row.pop("rating_count", None)
+                self._post("price_snapshots", chunk)
+            written += len(chunk)
         return written
+
+    def save_availability(self, run_id: str, checks: list[LocationCheck]) -> int:
+        """Every Blinkit dark store's answer for every listing — the Availability tab's data.
+
+        Raises RuntimeError if the `availability_checks` table does not exist yet; the caller
+        treats that as a warning, not a failed run.
+        """
+        rows = [
+            {
+                "run_id": run_id,
+                "sku": c.sku,
+                "marketplace": c.cell.marketplace,
+                "city": c.city,
+                "area": c.area,
+                "lat": c.lat,
+                "lon": c.lon,
+                "status": c.cell.status.value,
+                "price": c.cell.price,
+                "note": c.cell.note,
+            }
+            for c in checks
+        ]
+        for i in range(0, len(rows), CHUNK):
+            self._post("availability_checks", rows[i : i + CHUNK])
+        return len(rows)
