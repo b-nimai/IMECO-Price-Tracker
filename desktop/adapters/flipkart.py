@@ -28,7 +28,14 @@ from ._util import find_json_objects, to_price
 _PPD = re.compile(r'"ppd"\s*:\s*\{([^{}]*)\}')
 _FIELD = re.compile(r'"(\w+)"\s*:\s*(-?[\d.]+)')
 
-_UNAVAILABLE = re.compile(r"(?:Currently Out of Stock|Sold Out|This item is unavailable)", re.I)
+# `>Notify Me<` is the rendered button Flipkart now shows in place of "Buy Now" on a listing it
+# cannot sell — with the ppd node zeroed out ("fsp":0,"mrp":0) and none of the older phrases on
+# the page. Without it, 11 out-of-stock SKUs were reported as `error`. The button also appears on
+# some in-stock pages (a price alert), which is harmless: this is only consulted once no price
+# was found.
+_UNAVAILABLE = re.compile(
+    r"(?:Currently Out of Stock|Sold Out|This item is unavailable|>Notify Me<)", re.I
+)
 
 
 def _from_ppd(html: str) -> tuple[float | None, float | None]:
