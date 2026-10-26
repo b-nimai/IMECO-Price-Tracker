@@ -205,7 +205,9 @@ def load_products(path: Path | None = None) -> list[Product]:
     if not path.exists():
         raise FileNotFoundError(f"catalogue workbook not found: {path}")
 
-    book = load_workbook(path, data_only=True, read_only=True)
+    # Not read_only: that mode drops hyperlinks, and a link cell may show "Amazon" or "Link"
+    # with the URL only behind it. The sheet is small, so the full load costs nothing.
+    book = load_workbook(path, data_only=True)
     own, rivals = _read_sheet(book.worksheets[0], path, main=True)
     extra = next((ws for ws in book.worksheets if ws.title.strip().lower() == COMPETITOR_SHEET), None)
     if extra is not None and extra is not book.worksheets[0]:
@@ -256,6 +258,18 @@ def _read_listings(product: Product, row: tuple, cols: dict[int, tuple[str, str]
                 product.urls[marketplace] = url
 
 
+def _value(cell) -> object:
+    """A cell's value — or, for a hyperlink whose shown text is not a URL ("Amazon", "Link",
+    a product name), the address behind it. A pasted URL that Excel turned into a link reads the
+    same either way."""
+    value = cell.value
+    link = getattr(cell, "hyperlink", None)
+    target = getattr(link, "target", None) if link else None
+    if target and str(target).lower().startswith("http") and not str(value or "").lower().startswith("http"):
+        return target
+    return value
+
+
 def _cell(row: tuple, index: int | None) -> object:
     return row[index] if index is not None and index < len(row) else None
 
@@ -285,7 +299,7 @@ def _read_sheet(ws, path: Path, main: bool) -> tuple[list[Product], list[_Rival]
     is being filled in.
     """
     label = "first" if main else "Competitors"
-    rows = ws.iter_rows(values_only=True)
+    rows = (tuple(_value(c) for c in r) for r in ws.iter_rows())
     first = next(rows, None)
     if first is None or not any(str(c or "").strip() for c in first):
         if main:
