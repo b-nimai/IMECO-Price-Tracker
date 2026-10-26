@@ -16,6 +16,7 @@ import httpx
 
 from .config import Settings
 from .models import Cell, Product, Status
+from .tls import SSL_CONTEXT
 
 TIMEOUT = 60.0
 #: PostgREST rejects very large payloads; 110 rows fits comfortably in one request but the
@@ -30,6 +31,7 @@ class Store:
         self._base = f"{settings.supabase_url}/rest/v1"
         self._client = httpx.Client(
             timeout=TIMEOUT,
+            verify=SSL_CONTEXT,
             headers={
                 "apikey": settings.supabase_service_key,
                 "Authorization": f"Bearer {settings.supabase_service_key}",

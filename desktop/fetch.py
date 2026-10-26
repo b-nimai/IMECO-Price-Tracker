@@ -28,6 +28,7 @@ import httpx
 
 from .config import Settings
 from .models import Status, Via
+from .tls import SSL_CONTEXT
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -217,7 +218,9 @@ class Fetcher:
         self._seen_guard = threading.Lock()
         # The client keeps one cookie jar for the whole run on purpose — see the note above
         # `_navigation_headers`.
-        self._client = httpx.Client(headers=HEADERS, follow_redirects=True, timeout=TIMEOUT)
+        self._client = httpx.Client(
+            headers=HEADERS, follow_redirects=True, timeout=TIMEOUT, verify=SSL_CONTEXT
+        )
 
     def __enter__(self) -> "Fetcher":
         return self
