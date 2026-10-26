@@ -152,10 +152,13 @@ Desktop app + dashboard · needs `.exe` rebuild
 
 Desktop app + sheet + dashboard · needs `.exe` rebuild
 
-- [x] **One sheet** (26 Oct): competitors go in the product sheet itself, each row right under
-      the IMECO product it competes with — two optional columns, **Competitor Of** (IMECO SKU)
-      and **Brand**. No SKU to invent: the key is made from the first link
-      (`C:amazon:B0XXXXXXXX`). A separate "Competitors" sheet is still accepted
+- [x] **Same sheet, same rows, extra columns** (26 Oct): competitors go on each product's own
+      row — **Competitor 1 Brand / Name / Amazon Link / Flipkart Link / Blinkit Link**, then
+      Competitor 2 …, Competitor 3 … (add more groups any time). No SKU to invent: the key is
+      `C:<IMECO SKU>:<marketplace>:<listing id>`, so one rival can be compared with several of
+      our products. (A "Competitor Of" row form is still accepted.)
+- [x] `Docs/pricing link - with new columns.xlsx` — your current sheet, every cell unchanged,
+      with the 16 new columns added empty (gitignored like the original)
 - [x] `desktop/catalogue.py` reads it; refuses the sheet, naming the row, for an unknown IMECO
       SKU, a row with no link, or the same link twice. IMECO's own catalogue parses
       byte-for-byte as before (checked against the old parser on both workbooks)
@@ -166,12 +169,12 @@ Desktop app + sheet + dashboard · needs `.exe` rebuild
 - [x] **Competitors** tab — each IMECO product with its rivals under it, per marketplace:
       price, "₹50 cheaper than IMECO" in amber, rating; "IMECO cheapest on X of Y" per
       marketplace; empty state explains the sheet format
-- [x] `Docs/pricing link.example.xlsx` shows the one-sheet layout (a competitor row, keywords)
+- [x] `Docs/pricing link.example.xlsx` shows the column layout (keywords, one competitor)
 - [x] Filled in gradually without errors: empty / header-only extra sheets, competitor rows
       without links yet (skipped), missing optional columns — only a typo in Competitor Of is
       refused, at upload, naming the row
-- [ ] Add competitor rows (Competitor Of + Brand + a link) under your products, then upload the
-      workbook in the desktop app *(you)*
+- [ ] Fill in competitor columns in `pricing link - with new columns.xlsx`, then upload it in the
+      desktop app *(you)*
 - [x] Run the updated `supabase/schema.sql` *(done 26 Oct)*
 - [ ] Push, rebuild `.exe`, confirm competitors appear after the first run
 - ❌ Price per unit — the sheet carries no pack size to divide by; revisit if a "Pack Size"
@@ -240,3 +243,4 @@ Desktop app + dashboard · needs `.exe` rebuild
 | 26 Oct 2026 | Phase 5 built and tested: Competitors sheet, competitor scraping, Competitors tab. Waiting on your competitor links, schema run + `.exe` rebuild. Committed locally (`47d0c82`). |
 | 26 Oct 2026 | Schema run in Supabase (Phases 3–5). Phase 6 built and tested: daily keyword search, Search tab. |
 | 26 Oct 2026 | Schema re-run (search table). Full dry run of the new app: 96 listings, 6 dark stores, 19 keywords, 0 errors, 13.2 min. Workbook made forgiving for gradual filling, and **one sheet** now holds products, competitors and keywords. |
+| 26 Oct 2026 | Competitors moved to **columns on each product's row** (Competitor 1–3 Brand / Name / links) — the sheet keeps its rows exactly; a ready copy with the new columns is in `Docs/`. |

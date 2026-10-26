@@ -189,15 +189,17 @@ def load_products(path: Path | None = None) -> list[Product]:
     Defaults to `active_workbook()`, NOT to the shipped copy — so an operator-supplied sheet is
     what every run reads, without a single call site having to know that.
 
-    ONE SHEET IS ENOUGH. The first sheet holds IMECO's products and, optionally, their
-    competitors and search keywords, each product followed by its rivals:
+    ONE SHEET, ONE ROW PER PRODUCT — the sheet the operator already keeps, with optional columns
+    added on the right for that product's search keywords and its competitors' links:
 
-        SKU | Product Name | MRP | ... Links ... | Keywords | Competitor Of | Brand
+        SKU | Product Name | MRP | ... Links ... | Keywords |
+            Competitor 1 Brand | Competitor 1 Name | Competitor 1 Amazon Link | ... Flipkart ... |
+            ... Blinkit ... | Competitor 2 Brand | ...
 
-    A row with a SKU and no "Competitor Of" is an IMECO product; a row with "Competitor Of" is a
-    competitor of that SKU. The three columns on the right are optional, so a sheet without them
-    reads exactly as it always has. A separate "Competitors" sheet (and a "Keywords" sheet, see
-    desktop/search.py) is still accepted, read by the same rules.
+    As many numbered competitors as there are column groups. Every one of these columns is
+    optional, so a sheet without them reads exactly as it always has, and a competitor whose
+    links are still blank is simply not tracked yet. (Competitor rows with a "Competitor Of"
+    column, on this sheet or a separate "Competitors" sheet, are still accepted too.)
     """
     path = path or active_workbook()
     if not path.exists():
@@ -294,6 +296,7 @@ def _read_sheet(ws, path: Path, main: bool) -> tuple[list[Product], list[_Rival]
     sku_col, name_col, mrp_col = fixed.get("sku"), fixed.get("product name"), fixed.get("mrp")
     of_col, brand_col = fixed.get("competitor of"), fixed.get("brand")
     kw_col = fixed.get("keywords", fixed.get("keyword"))
+    slots = _competitor_columns(fixed, cols)
     if main and (sku_col is None or name_col is None):
         raise ValueError(f"{path.name}: missing required 'SKU' / 'Product Name' headers")
     if not main and of_col is None:
@@ -339,19 +342,62 @@ def _read_sheet(ws, path: Path, main: bool) -> tuple[list[Product], list[_Rival]
         )
         _read_listings(product, row, cols)
         own.append(product)
+        for slot, fields in sorted(slots.items()):
+            rival = _rival_from_columns(row, fields, sku)
+            if rival is not None:
+                rivals.append(_Rival(rival, "", f"row {n}, competitor {slot}"))
     return own, rivals
 
 
+# "Competitor 2 Amazon Link", "competitor 2 brand", "Competitor2 Flipkart Link", ...
+_COMPETITOR_COLUMN = re.compile(
+    r"^competitor\s*(\d+)\s*(brand|name|product name|amazon link|flipkart link|blinkit link)$"
+)
+
+
+def _competitor_columns(
+    fixed: dict[str, int], cols: dict[int, tuple[str, str]]
+) -> dict[int, dict[str, int]]:
+    """{competitor number: {field: column index}} from the header's "Competitor N ..." columns."""
+    slots: dict[int, dict[str, int]] = {}
+    for key, index in fixed.items():
+        m = _COMPETITOR_COLUMN.match(key)
+        if m:
+            field_name = "name" if m.group(2) == "product name" else m.group(2)
+            slots.setdefault(int(m.group(1)), {})[field_name] = index
+    return slots
+
+
+def _rival_from_columns(row: tuple, fields: dict[str, int], of: str) -> Product | None:
+    """One competitor from one product row's "Competitor N" columns, or None while its links
+    are still blank."""
+    rival = Product(
+        sku="",
+        name=str(_cell(row, fields.get("name")) or "").strip(),
+        mrp=None,
+        starred=False,
+        position=0,
+        brand=str(_cell(row, fields.get("brand")) or "").strip() or "Unknown brand",
+        competitor_of=of,
+    )
+    for marketplace in ("amazon", "flipkart", "blinkit"):
+        raw = _cell(row, fields.get(f"{marketplace} link"))
+        url = canonical_url(marketplace, str(raw)) if raw else None
+        if url:
+            rival.urls[marketplace] = url
+    return rival if rival.urls else None
+
+
 # ── Competitors ─────────────────────────────────────────────────────────────────────────
-# A competitor is any row with "Competitor Of" filled in — on the main sheet, right under the
-# IMECO product it competes with, or on an optional separate "Competitors" sheet:
+# Entered as numbered column groups on each IMECO product's own row (see `load_products`):
 #
-#   Competitor Of | Brand | Product Name | MRP | Amazon Link | Flipkart Link | Blinkit Link
+#   Competitor 1 Brand | Competitor 1 Name | Competitor 1 Amazon Link | Competitor 1 Flipkart
+#   Link | Competitor 1 Blinkit Link | Competitor 2 Brand | ...
 #
-# "Competitor Of" is the IMECO SKU it competes with. There is deliberately no SKU to fill in:
-# a competitor's key is made from its first link (`C:amazon:B0XXXXXXXX`), which is already
-# unique and stays the same however the row is edited or moved. A SKU typed on the row is
-# still honoured.
+# There is deliberately no SKU to fill in: a competitor's key is made from the IMECO SKU and its
+# first link (`C:IMEBKT360:amazon:B0XXXXXXXX`), which is unique and stays the same however the
+# sheet is edited. The older row form — a row with "Competitor Of" set to the IMECO SKU, on this
+# sheet or on a separate "Competitors" sheet — is read by the same rules.
 COMPETITOR_SHEET = "competitors"
 LISTING_ID = {
     "amazon": re.compile(r"/dp/([A-Z0-9]{10})"),
@@ -361,11 +407,13 @@ LISTING_ID = {
 
 
 def _competitor_key(product: Product) -> str | None:
+    """`C:<IMECO SKU>:<marketplace>:<listing id>`. The IMECO SKU is part of it so the same rival
+    listing can be compared against more than one of our products."""
     for marketplace in ("amazon", "flipkart", "blinkit"):
         url = product.urls.get(marketplace)
         m = url and LISTING_ID[marketplace].search(url)
         if m:
-            return f"C:{marketplace}:{m.group(1)}"
+            return f"C:{product.competitor_of}:{marketplace}:{m.group(1)}"
     return None
 
 
@@ -390,11 +438,13 @@ def _resolve_competitors(rivals: list[_Rival], own: list[Product], path: Path) -
         key = r.explicit_sku or _competitor_key(product)
         if not key:
             continue  # no link found for it yet — nothing to fetch until one is added
+        if any(p.sku == key for p in out):
+            continue  # the same rival entered twice for the same product: track it once
         product.sku = key
         # After every IMECO product, so a competitor can never sit among them in sheet order.
         product.position = len(own) + len(out)
         if not product.name:
-            product.name = f"{product.brand} ({key})"
+            product.name = product.brand
         out.append(product)
     return out
 

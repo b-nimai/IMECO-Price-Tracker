@@ -44,7 +44,8 @@ desktop/_baked.py
 # The app does not need them to be in git. `Docs/pricing link.example.xlsx` IS committed and
 # documents the exact column contract; the operator supplies the real sheet through the
 # desktop app's Spreadsheet button, which stores it in %LOCALAPPDATA%.
-Docs/pricing link.xlsx
+# Any working copy of it too ("pricing link - with new columns.xlsx", ...), not just the one name.
+Docs/pricing link*.xlsx
 public/demo-prices.json
 !Docs/pricing link.example.xlsx
 

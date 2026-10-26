@@ -121,50 +121,67 @@ interface Group {
 }
 
 function EmptyState() {
-  // Shown as the product sheet itself looks: a product row, then its competitors right under it.
-  const rows = [
-    ['IMEBKT360', 'Kitchen Tissues Roll (60 Pulls x 6)', 'https://www.amazon.in/dp/…', '', ''],
-    ['', 'Origami Kitchen Towel 2 Ply', 'https://www.amazon.in/dp/…', 'IMEBKT360', 'Origami'],
-    ['', 'Premier Kitchen Roll', 'https://www.amazon.in/dp/…', 'IMEBKT360', 'Premier'],
+  // As the product sheet itself looks: the same row, with the competitor's columns to the right.
+  const headers = [
+    'SKU',
+    'Product Name',
+    '…',
+    'Competitor 1 Brand',
+    'Competitor 1 Name',
+    'Competitor 1 Amazon Link',
+    'Competitor 1 Flipkart Link',
+    'Competitor 1 Blinkit Link',
+    'Competitor 2 Brand',
+    '…',
+  ];
+  const row = [
+    'IMEBKT360',
+    'Kitchen Tissues Roll',
+    '…',
+    'Origami',
+    'Origami Kitchen Towel',
+    'https://www.amazon.in/dp/…',
+    '',
+    'https://blinkit.com/prn/…',
+    'Premier',
+    '…',
   ];
   return (
     <Card className="card-glass">
-      <CardContent className="mx-auto flex max-w-2xl flex-col gap-3 py-8 text-sm text-muted-foreground">
+      <CardContent className="mx-auto flex max-w-3xl flex-col gap-3 py-8 text-sm text-muted-foreground">
         <p className="text-base font-medium text-foreground">No competitors added yet</p>
         <p>
-          Add competitors in the same product sheet, each right under the IMECO product it competes
-          with. Two extra columns, <strong className="text-foreground">Competitor Of</strong> and{' '}
-          <strong className="text-foreground">Brand</strong>:
+          Competitors go on each product’s own row in the product sheet — in the{' '}
+          <strong className="text-foreground">Competitor 1</strong>,{' '}
+          <strong className="text-foreground">Competitor 2</strong>,{' '}
+          <strong className="text-foreground">Competitor 3</strong> columns on the right:
         </p>
         <div className="overflow-x-auto rounded-md border border-border">
           <table className="w-full text-xs">
             <thead className="bg-muted/40 text-foreground">
               <tr>
-                {['SKU', 'Product Name', 'Amazon Link', 'Competitor Of', 'Brand'].map((h) => (
-                  <th key={h} className="px-2 py-1.5 text-left font-medium whitespace-nowrap">
+                {headers.map((h, i) => (
+                  <th key={i} className="px-2 py-1.5 text-left font-medium whitespace-nowrap">
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, r) => (
-                <tr key={r} className={r === 0 ? 'text-foreground' : undefined}>
-                  {row.map((v, i) => (
-                    <td key={i} className="px-2 py-1.5 whitespace-nowrap">
-                      {v}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+              <tr>
+                {row.map((v, i) => (
+                  <td key={i} className="px-2 py-1.5 whitespace-nowrap">
+                    {v}
+                  </td>
+                ))}
+              </tr>
             </tbody>
           </table>
         </div>
         <p>
-          A competitor row needs no SKU — <strong className="text-foreground">Competitor Of</strong>{' '}
-          is the IMECO SKU it competes with, and any one link is enough. Rows without a link yet are
-          simply skipped. Then upload the workbook in the desktop app — competitors are priced on
-          the next run, alongside IMECO’s own products.
+          Any one link is enough; a competitor whose links are still blank is simply not tracked
+          yet. Then upload the workbook in the desktop app — competitors are priced on the next run,
+          alongside IMECO’s own products.
         </p>
       </CardContent>
     </Card>
