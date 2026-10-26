@@ -1,0 +1,28 @@
+# Builds desktop/dist/IMECO Price Tracker.exe on a Windows runner, for when no Windows machine
+# is at hand. Run it from the Actions tab or `gh workflow run build-exe.yml`.
+#
+# Deliberately built WITHOUT ../.env: this repo is public and so are its workflow artifacts, so
+# no Supabase key is baked in. The .exe prompts for credentials on first launch (or finds them
+# already in Windows Credential Manager), and bundles the example sheet — the operator's own
+# sheet, uploaded through the Spreadsheet button, still takes precedence.
+name: Build Windows exe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        shell: powershell
+        run: ./desktop/build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IMECO-Price-Tracker-exe
+          path: desktop/dist/IMECO Price Tracker.exe
+          retention-days: 7
