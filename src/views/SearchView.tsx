@@ -190,11 +190,10 @@ function EmptyState({ missing }: { missing: boolean }) {
         </p>
         <p>
           It starts with 19 keywords for IMECO’s product types (“kitchen tissue roll”, “garbage
-          bags”, “bamboo toothbrush”…). To choose your own, add a sheet named{' '}
-          <strong className="text-foreground">Keywords</strong> to the pricing workbook with a{' '}
-          <strong className="text-foreground">Keyword</strong> column, and optionally a{' '}
-          <strong className="text-foreground">Marketplaces</strong> column (e.g. “amazon, blinkit”)
-          where one should not be searched everywhere.
+          bags”, “bamboo toothbrush”…). To choose your own, add a{' '}
+          <strong className="text-foreground">Keywords</strong> column to the product sheet and type
+          each product’s search words in its cell, separated by commas — once any are filled in,
+          those are searched instead of the defaults.
         </p>
       </CardContent>
     </Card>

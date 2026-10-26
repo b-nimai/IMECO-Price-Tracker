@@ -39,9 +39,9 @@ from .models import MARKETPLACES, Product
 #: "Good Habit" on at least one listing), so a title naming either is ours.
 OWN_BRANDS = ("IMECO", "Good Habbit", "Good Habit")
 
-#: Searched when the workbook has no "Keywords" sheet: what a shopper would type for each of
-#: the catalogue's product types. A "Keywords" sheet (one "Keyword" column, optional
-#: "Marketplaces" column) replaces this list entirely.
+#: Searched until the workbook names any keywords of its own: what a shopper would type for
+#: each of the catalogue's product types. Keywords typed in the product sheet's "Keywords"
+#: column (or on a separate "Keywords" sheet) replace this list entirely.
 DEFAULT_KEYWORDS = (
     "kitchen tissue roll",
     "kitchen towel roll",
@@ -251,42 +251,57 @@ def attribute(results: list[SearchResult], products: list[Product]) -> None:
 # ── what to search, and when ────────────────────────────────────────────────────────────
 
 
-def load_keywords(path: Path | None = None) -> list[tuple[str, tuple[str, ...]]]:
-    """[(keyword, marketplaces)] from the workbook's "Keywords" sheet, else the defaults.
+def load_keywords(
+    path: Path | None = None, products: list[Product] | None = None
+) -> list[tuple[str, tuple[str, ...]]]:
+    """[(keyword, marketplaces)] to search today.
 
-    A blank "Marketplaces" cell means all three. Duplicates are dropped, case-insensitively.
-    A sheet with no keywords in it yet means the defaults too — an empty placeholder must not
-    switch the daily search off. Raises ValueError only for a sheet that has rows but no
-    "Keyword" header; `run.run_search` then searches the defaults and reports why.
+    From the product sheet's "Keywords" column (each product's own cell — the one-sheet layout),
+    plus an optional separate "Keywords" sheet (Keyword, optional Marketplaces; a blank cell
+    means all three). Duplicates are dropped, case-insensitively.
+
+    Until a single keyword has been typed anywhere, the defaults are searched — the workbook is
+    filled in gradually, and an empty column or placeholder sheet must not switch the daily
+    search off. Raises ValueError only for a Keywords sheet that has rows but no "Keyword"
+    header; `run.run_search` then searches the defaults and reports why.
     """
     path = path or active_workbook()
+    if products is None:
+        from .catalogue import load_products
+
+        products = load_products(path)
+
+    out: list[tuple[str, tuple[str, ...]]] = []
+    seen: set[str] = set()
+
+    def add(keyword: str, where: tuple[str, ...]) -> None:
+        keyword = " ".join(keyword.split())
+        if keyword and keyword.lower() not in seen:
+            seen.add(keyword.lower())
+            out.append((keyword, where))
+
+    for p in products:
+        if p.competitor_of is None:
+            for keyword in p.keywords:
+                add(keyword, MARKETPLACES)
+
     sheet = None
     if path.exists():
         book = load_workbook(path, data_only=True, read_only=True)
         sheet = next((ws for ws in book.worksheets if ws.title.strip().lower() == KEYWORD_SHEET), None)
+    if sheet is not None:
+        rows = sheet.iter_rows(values_only=True)
+        header = [str(c or "").strip().lower() for c in next(rows, ())]
+        if any(header):
+            if "keyword" not in header:
+                raise ValueError(f"{path.name}: the Keywords sheet needs a 'Keyword' column")
+            kw_col = header.index("keyword")
+            mp_col = header.index("marketplaces") if "marketplaces" in header else None
+            for row in rows:
+                keyword = str(row[kw_col] or "") if kw_col < len(row) else ""
+                raw = str(row[mp_col] or "") if mp_col is not None and mp_col < len(row) else ""
+                add(keyword, tuple(m for m in MARKETPLACES if m in raw.lower()) or MARKETPLACES)
 
-    if sheet is None:
-        return [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
-
-    rows = sheet.iter_rows(values_only=True)
-    header = [str(c or "").strip().lower() for c in next(rows, ())]
-    if not any(header):
-        return [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
-    if "keyword" not in header:
-        raise ValueError(f"{path.name}: the Keywords sheet needs a 'Keyword' column")
-    kw_col = header.index("keyword")
-    mp_col = header.index("marketplaces") if "marketplaces" in header else None
-
-    out: list[tuple[str, tuple[str, ...]]] = []
-    seen: set[str] = set()
-    for row in rows:
-        keyword = " ".join(str(row[kw_col] or "").split()) if kw_col < len(row) else ""
-        if not keyword or keyword.lower() in seen:
-            continue
-        seen.add(keyword.lower())
-        raw = str(row[mp_col] or "") if mp_col is not None and mp_col < len(row) else ""
-        wanted = tuple(m for m in MARKETPLACES if m in raw.lower()) or MARKETPLACES
-        out.append((keyword, wanted))
     return out or [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
 
 
@@ -354,8 +369,8 @@ def _main(argv: list[str]) -> int:
 
     if sys.stdout is not None:  # None under pythonw.exe — see run.main()
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    keywords = [(k, MARKETPLACES) for k in argv] or load_keywords()
     products = load_products()
+    keywords = [(k, MARKETPLACES) for k in argv] or load_keywords(products=products)
     with Fetcher(load_settings()) as fetcher:
         results, problems = search(keywords, fetcher, products)
 

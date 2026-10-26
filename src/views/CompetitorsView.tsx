@@ -121,27 +121,26 @@ interface Group {
 }
 
 function EmptyState() {
+  // Shown as the product sheet itself looks: a product row, then its competitors right under it.
+  const rows = [
+    ['IMEBKT360', 'Kitchen Tissues Roll (60 Pulls x 6)', 'https://www.amazon.in/dp/…', '', ''],
+    ['', 'Origami Kitchen Towel 2 Ply', 'https://www.amazon.in/dp/…', 'IMEBKT360', 'Origami'],
+    ['', 'Premier Kitchen Roll', 'https://www.amazon.in/dp/…', 'IMEBKT360', 'Premier'],
+  ];
   return (
     <Card className="card-glass">
       <CardContent className="mx-auto flex max-w-2xl flex-col gap-3 py-8 text-sm text-muted-foreground">
         <p className="text-base font-medium text-foreground">No competitors added yet</p>
         <p>
-          Add a sheet named <strong className="text-foreground">Competitors</strong> to the pricing
-          workbook, with one row per competing product:
+          Add competitors in the same product sheet, each right under the IMECO product it competes
+          with. Two extra columns, <strong className="text-foreground">Competitor Of</strong> and{' '}
+          <strong className="text-foreground">Brand</strong>:
         </p>
         <div className="overflow-x-auto rounded-md border border-border">
           <table className="w-full text-xs">
             <thead className="bg-muted/40 text-foreground">
               <tr>
-                {[
-                  'Competitor Of',
-                  'Brand',
-                  'Product Name',
-                  'MRP',
-                  'Amazon Link',
-                  'Flipkart Link',
-                  'Blinkit Link',
-                ].map((h) => (
+                {['SKU', 'Product Name', 'Amazon Link', 'Competitor Of', 'Brand'].map((h) => (
                   <th key={h} className="px-2 py-1.5 text-left font-medium whitespace-nowrap">
                     {h}
                   </th>
@@ -149,28 +148,23 @@ function EmptyState() {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                {[
-                  'IMEBKT360',
-                  'Origami',
-                  'Kitchen Towel 2 ply',
-                  '199',
-                  'https://www.amazon.in/dp/…',
-                  '',
-                  '',
-                ].map((v, i) => (
-                  <td key={i} className="px-2 py-1.5 whitespace-nowrap">
-                    {v}
-                  </td>
-                ))}
-              </tr>
+              {rows.map((row, r) => (
+                <tr key={r} className={r === 0 ? 'text-foreground' : undefined}>
+                  {row.map((v, i) => (
+                    <td key={i} className="px-2 py-1.5 whitespace-nowrap">
+                      {v}
+                    </td>
+                  ))}
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
         <p>
-          <strong className="text-foreground">Competitor Of</strong> is the IMECO SKU, exactly as on
-          the first sheet. Any one link is enough. Then upload the workbook in the desktop app —
-          competitors are priced on the next run, alongside IMECO’s own products.
+          A competitor row needs no SKU — <strong className="text-foreground">Competitor Of</strong>{' '}
+          is the IMECO SKU it competes with, and any one link is enough. Rows without a link yet are
+          simply skipped. Then upload the workbook in the desktop app — competitors are priced on
+          the next run, alongside IMECO’s own products.
         </p>
       </CardContent>
     </Card>

@@ -15,6 +15,7 @@ import os
 import re
 import shutil
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -187,17 +188,28 @@ def load_products(path: Path | None = None) -> list[Product]:
 
     Defaults to `active_workbook()`, NOT to the shipped copy — so an operator-supplied sheet is
     what every run reads, without a single call site having to know that.
+
+    ONE SHEET IS ENOUGH. The first sheet holds IMECO's products and, optionally, their
+    competitors and search keywords, each product followed by its rivals:
+
+        SKU | Product Name | MRP | ... Links ... | Keywords | Competitor Of | Brand
+
+    A row with a SKU and no "Competitor Of" is an IMECO product; a row with "Competitor Of" is a
+    competitor of that SKU. The three columns on the right are optional, so a sheet without them
+    reads exactly as it always has. A separate "Competitors" sheet (and a "Keywords" sheet, see
+    desktop/search.py) is still accepted, read by the same rules.
     """
     path = path or active_workbook()
     if not path.exists():
         raise FileNotFoundError(f"catalogue workbook not found: {path}")
 
     book = load_workbook(path, data_only=True, read_only=True)
-    products = _own_products(book.worksheets[0], path)
-    rivals = next((ws for ws in book.worksheets if ws.title.strip().lower() == COMPETITOR_SHEET), None)
-    if rivals is not None:
-        products += _competitors(rivals, path, products)
+    own, rivals = _read_sheet(book.worksheets[0], path, main=True)
+    extra = next((ws for ws in book.worksheets if ws.title.strip().lower() == COMPETITOR_SHEET), None)
+    if extra is not None and extra is not book.worksheets[0]:
+        rivals += _read_sheet(extra, path, main=False)[1]
 
+    products = own + _resolve_competitors(rivals, own, path)
     _reject_duplicates(products, path)
     return products
 
@@ -246,46 +258,100 @@ def _cell(row: tuple, index: int | None) -> object:
     return row[index] if index is not None and index < len(row) else None
 
 
-def _own_products(ws, path: Path) -> list[Product]:
-    """IMECO's own catalogue: the workbook's first sheet."""
-    rows = ws.iter_rows(values_only=True)
-    fixed, cols = _header(rows, path, "first")
-    sku_col, name_col, mrp_col = fixed.get("sku"), fixed.get("product name"), fixed.get("mrp")
-    if sku_col is None or name_col is None:
-        raise ValueError(f"{path.name}: missing required 'SKU' / 'Product Name' headers")
+_KEYWORD_SPLIT = re.compile(r"[,;|\n]+")
 
-    products: list[Product] = []
-    for row in rows:
-        raw_sku = str(_cell(row, sku_col) or "").replace(STAR, "").strip()
-        if not raw_sku:
+
+def split_keywords(raw: object) -> list[str]:
+    """A Keywords cell -> its keywords. Commas, semicolons, "|" or new lines all separate."""
+    return [" ".join(k.split()) for k in _KEYWORD_SPLIT.split(str(raw or "")) if k.strip()]
+
+
+@dataclass
+class _Rival:
+    """A competitor row, held until every IMECO SKU is known so "Competitor Of" can be checked."""
+
+    product: Product
+    explicit_sku: str
+    where: str  # "row 7" / "Competitors row 3", for the error message
+
+
+def _read_sheet(ws, path: Path, main: bool) -> tuple[list[Product], list[_Rival]]:
+    """(IMECO products, competitor rows) from one sheet.
+
+    `main` is the workbook's first sheet, which must have SKU and Product Name. The optional
+    "Competitors" sheet needs only "Competitor Of" — and may be empty, or header-only, while it
+    is being filled in.
+    """
+    label = "first" if main else "Competitors"
+    rows = ws.iter_rows(values_only=True)
+    first = next(rows, None)
+    if first is None or not any(str(c or "").strip() for c in first):
+        if main:
+            raise ValueError(f"{path.name} is empty")
+        return [], []  # an empty placeholder sheet
+    fixed, cols = _header(iter([first]), path, label)
+
+    sku_col, name_col, mrp_col = fixed.get("sku"), fixed.get("product name"), fixed.get("mrp")
+    of_col, brand_col = fixed.get("competitor of"), fixed.get("brand")
+    kw_col = fixed.get("keywords", fixed.get("keyword"))
+    if main and (sku_col is None or name_col is None):
+        raise ValueError(f"{path.name}: missing required 'SKU' / 'Product Name' headers")
+    if not main and of_col is None:
+        raise ValueError(f"{path.name}: the Competitors sheet needs a 'Competitor Of' column")
+
+    own: list[Product] = []
+    rivals: list[_Rival] = []
+    for n, row in enumerate(rows, start=2):  # Excel row number, header being row 1
+        raw_sku = str(_cell(row, sku_col) or "")
+        sku = raw_sku.replace(STAR, "").strip()
+        of = str(_cell(row, of_col) or "").replace(STAR, "").strip()
+        name = str(_cell(row, name_col) or "").strip()
+        mrp = parse_price(_cell(row, mrp_col))
+
+        if of:
+            rival = Product(
+                sku="",
+                name=name,
+                mrp=mrp,
+                starred=False,
+                position=0,  # set in _resolve_competitors, after every IMECO product
+                brand=str(_cell(row, brand_col) or "").strip() or "Unknown brand",
+                competitor_of=of,
+            )
+            _read_listings(rival, row, cols)
+            where = f"row {n}" if main else f"Competitors row {n}"
+            rivals.append(_Rival(rival, sku, where))
+            continue
+        if not main or not sku:
             continue  # blank spacer row
 
         product = Product(
-            sku=raw_sku,
-            name=str(_cell(row, name_col) or "").strip(),
-            mrp=parse_price(_cell(row, mrp_col)),
-            starred=STAR in str(_cell(row, sku_col) or ""),
-            # Position among PARSED rows, not among worksheet rows: blank spacers are skipped
-            # above, and a gap in the numbering would otherwise appear wherever the sheet has
-            # one. The dashboard only ever sorts on this, so density is what matters, not
-            # matching a row number in Excel.
-            position=len(products),
+            sku=sku,
+            name=name,
+            mrp=mrp,
+            starred=STAR in raw_sku,
+            # Position among PARSED rows, not among worksheet rows: blank spacers and competitor
+            # rows are skipped, and a gap in the numbering would otherwise appear wherever the
+            # sheet has one. The dashboard only ever sorts on this, so density is what matters,
+            # not matching a row number in Excel.
+            position=len(own),
+            keywords=split_keywords(_cell(row, kw_col)),
         )
         _read_listings(product, row, cols)
-        products.append(product)
-    return products
+        own.append(product)
+    return own, rivals
 
 
 # ── Competitors ─────────────────────────────────────────────────────────────────────────
-# An optional second sheet, named "Competitors", listing rival products to price against
-# IMECO's. One row per competing product:
+# A competitor is any row with "Competitor Of" filled in — on the main sheet, right under the
+# IMECO product it competes with, or on an optional separate "Competitors" sheet:
 #
 #   Competitor Of | Brand | Product Name | MRP | Amazon Link | Flipkart Link | Blinkit Link
 #
-# "Competitor Of" is the IMECO SKU it competes with. There is deliberately no SKU column to
-# fill in: a competitor's key is made from its first link (`C:amazon:B0XXXXXXXX`), which is
-# already unique and stays the same however the row is edited or moved. An explicit "SKU"
-# column is still honoured if someone adds one.
+# "Competitor Of" is the IMECO SKU it competes with. There is deliberately no SKU to fill in:
+# a competitor's key is made from its first link (`C:amazon:B0XXXXXXXX`), which is already
+# unique and stays the same however the row is edited or moved. A SKU typed on the row is
+# still honoured.
 COMPETITOR_SHEET = "competitors"
 LISTING_ID = {
     "amazon": re.compile(r"/dp/([A-Z0-9]{10})"),
@@ -303,55 +369,30 @@ def _competitor_key(product: Product) -> str | None:
     return None
 
 
-def _competitors(ws, path: Path, own: list[Product]) -> list[Product]:
-    """The "Competitors" sheet.
+def _resolve_competitors(rivals: list[_Rival], own: list[Product], path: Path) -> list[Product]:
+    """Key and check the competitor rows.
 
-    Built to be filled in GRADUALLY: an empty sheet, a header with no rows, or a row whose links
-    have not been found yet are all fine — they simply add no competitors yet. Only a genuine
-    mistake is refused, by row: a "Competitor Of" that is not an IMECO SKU (a typo would
-    otherwise compare a rival against nothing). Same reasoning as `_reject_duplicates`: tell the
-    operator now, while they are looking at the file, not an hour later in a scheduled run.
+    Built to be filled in GRADUALLY: a row whose links have not been found yet is skipped until
+    one is added. Only a genuine mistake is refused, by row: a "Competitor Of" that is not an
+    IMECO SKU (a typo would otherwise compare a rival against nothing). Same reasoning as
+    `_reject_duplicates`: tell the operator now, while they are looking at the file, not an
+    hour later in a scheduled run.
     """
-    rows = ws.iter_rows(values_only=True)
-    first = next(rows, None)
-    if first is None or not any(str(c or "").strip() for c in first):
-        return []  # an empty placeholder sheet
-    fixed, cols = _header(iter([first]), path, "Competitors")
-    of_col = fixed.get("competitor of")
-    if of_col is None:
-        raise ValueError(f"{path.name}: the Competitors sheet needs a 'Competitor Of' column")
-    brand_col, name_col = fixed.get("brand"), fixed.get("product name")
-    mrp_col, sku_col = fixed.get("mrp"), fixed.get("sku")
-
     known = {p.sku for p in own}
     out: list[Product] = []
-    for n, row in enumerate(rows, start=2):  # Excel row number, header being row 1
-        of = str(_cell(row, of_col) or "").replace(STAR, "").strip()
-        if not of:
-            continue  # blank spacer row
-        if of not in known:
+    for r in rivals:
+        product = r.product
+        if product.competitor_of not in known:
             raise ValueError(
-                f"{path.name}: Competitors row {n} says 'Competitor Of' {of!r}, which is not a "
-                "SKU on the first sheet. Use the IMECO SKU exactly as it is written there."
+                f"{path.name}: {r.where} says 'Competitor Of' {product.competitor_of!r}, which "
+                "is not an IMECO SKU in this sheet. Use the SKU exactly as it is written there."
             )
-
-        product = Product(
-            sku="",
-            name=str(_cell(row, name_col) or "").strip(),
-            mrp=parse_price(_cell(row, mrp_col)),
-            starred=False,
-            # After every IMECO product, so a competitor can never sit among them in sheet order.
-            position=len(own) + len(out),
-            brand=str(_cell(row, brand_col) or "").strip() or "Unknown brand",
-            competitor_of=of,
-        )
-        _read_listings(product, row, cols)
-
-        explicit = str(_cell(row, sku_col) or "").strip()
-        key = explicit or _competitor_key(product)
+        key = r.explicit_sku or _competitor_key(product)
         if not key:
             continue  # no link found for it yet — nothing to fetch until one is added
         product.sku = key
+        # After every IMECO product, so a competitor can never sit among them in sheet order.
+        product.position = len(own) + len(out)
         if not product.name:
             product.name = f"{product.brand} ({key})"
         out.append(product)

@@ -124,6 +124,8 @@ class Product:
     competitor_of: str | None = None
     """For a competitor: the IMECO SKU it is compared against. None for IMECO's own products —
     which is how the dashboard keeps competitors off the wall display."""
+    keywords: list[str] = field(default_factory=list)
+    """Search keywords typed in this product's "Keywords" cell, for the daily search."""
 
     def url_for(self, marketplace: str) -> str | None:
         return self.urls.get(marketplace)

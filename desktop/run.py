@@ -339,7 +339,7 @@ def run_search(products: list[Product], fetcher: Fetcher) -> tuple[list[SearchRe
     """
     problems: list[str] = []
     try:
-        keywords = load_keywords()
+        keywords = load_keywords(products=products)
     except Exception as exc:
         problems.append(f"{exc} — searched the default keywords instead")
         keywords = [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
