@@ -19,6 +19,7 @@ from __future__ import annotations
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -55,10 +56,17 @@ class App:
         self.root = root
         self.events: queue.Queue = queue.Queue()
         self.running = False
+        # The step under way and when the run started: the subtitle shows both with a ticking
+        # clock, and every unfinished bar gets a spinner — so a single slow fetch (Blinkit's
+        # every-store walk, Amazon's anti-bot wait) never looks like a hang.
+        self.phase = ""
+        self.started = 0.0
+        self.tick = 0
+        self.counts: dict[str, tuple[int, int]] = {}
 
         root.title("IMECO Price Tracker")
         root.configure(bg=BG)
-        root.geometry("560x420")
+        root.geometry("560x450")
         root.resizable(False, False)
 
         tk.Label(
@@ -98,6 +106,21 @@ class App:
             label.grid(row=row, column=2, sticky="w")
             self.bars[marketplace] = bar
             self.labels[marketplace] = label
+
+        # The save at the end, as its own row: it has its own wait, after the three are full.
+        tk.Label(
+            grid, text="Saving", bg=BG, fg=FG,
+            font=("Segoe UI", 9), width=10, anchor="w",
+        ).grid(row=len(MARKETPLACES), column=0, sticky="w", pady=4)
+        self.save_bar = ttk.Progressbar(
+            grid, length=300, mode="determinate",
+            style="IMECO.Horizontal.TProgressbar",
+        )
+        self.save_bar.grid(row=len(MARKETPLACES), column=1, padx=8)
+        self.save_label = tk.Label(
+            grid, text="-", bg=BG, fg=MUTED, font=("Consolas", 9), width=14, anchor="w"
+        )
+        self.save_label.grid(row=len(MARKETPLACES), column=2, sticky="w")
 
         self.status = tk.Label(root, text="", bg=BG, fg=MUTED, font=("Consolas", 9))
         self.status.pack(pady=(16, 4))
@@ -181,10 +204,14 @@ class App:
 
         self.running = True
         self.run_button.config(state="disabled", text="Running...")
-        self.subtitle.config(text="Fetching prices...", fg=MUTED)
+        self.phase = "Fetching prices"
+        self.started = time.monotonic()
         for marketplace in MARKETPLACES:
             self.bars[marketplace]["value"] = 0
             self.labels[marketplace].config(text="-", fg=MUTED)
+        self.save_bar["value"] = 0
+        self.save_label.config(text="-", fg=MUTED)
+        self.counts.clear()
 
         threading.Thread(target=self._work, args=("manual",), daemon=True).start()
 
@@ -208,12 +235,15 @@ class App:
                 searches = None
                 problems: list[str] = []
                 if search_wanted(settings):
-                    self.events.put(("phase", "Searching keywords (once a day)..."))
+                    self.events.put(("phase", "Searching keywords (once a day)"))
                     searches, problems = run_search(products, fetcher, progress)
                     write_search_log(searches, problems)
 
-            self.events.put(("phase", "Saving to the dashboard..."))
-            store_results(settings, products, results, checks, source, searches)
+            self.events.put(("phase", "Saving to the dashboard"))
+            store_results(
+                settings, products, results, checks, source, searches,
+                lambda done, total: self.events.put(("saving", done, total)),
+            )
 
             ok = sum(c.status is Status.OK for _, c in results)
             self.events.put(("done", ok, len(results), len(problems)))
@@ -272,13 +302,18 @@ class App:
                     bar = self.bars[marketplace]
                     bar["maximum"] = max(total, 1)
                     bar["value"] = done
-                    self.labels[marketplace].config(text=f"{done}/{total}", fg=FG)
+                    self.counts[marketplace] = (done, total)
                 elif event[0] == "phase":
-                    self.subtitle.config(text=event[1], fg=MUTED)
+                    self.phase = event[1]
                     if event[1].startswith("Searching"):
                         for marketplace in MARKETPLACES:
                             self.bars[marketplace]["value"] = 0
-                            self.labels[marketplace].config(text="-", fg=MUTED)
+                            self.counts.pop(marketplace, None)
+                elif event[0] == "saving":
+                    _, done, total = event
+                    self.save_bar["maximum"] = max(total, 1)
+                    self.save_bar["value"] = done
+                    self.counts["saving"] = (done, total)
                 elif event[0] == "done":
                     _, ok, total, problems = event
                     if problems:
@@ -300,11 +335,37 @@ class App:
                         self.subtitle.config(text=event[1][:70], fg=ACCENT if event[2] else WARN)
         except queue.Empty:
             pass
+        if self.running:
+            self._heartbeat()
         self.root.after(120, self._drain)
+
+    def _heartbeat(self) -> None:
+        """Redraw the moving parts of a run: the step with its elapsed time, and a spinner on
+        every row still working. Runs on every drain tick, so it moves even while the worker
+        is stuck inside one long request and no event is arriving."""
+        self.tick += 1
+        secs = int(time.monotonic() - self.started)
+        self.subtitle.config(text=f"{self.phase}...  {secs // 60}:{secs % 60:02d}", fg=MUTED)
+        spin = "|/-\\"[(self.tick // 2) % 4]
+        rows = [(m, self.labels[m]) for m in MARKETPLACES]
+        if self.phase.startswith("Saving"):
+            rows = [("saving", self.save_label)]
+        for key, label in rows:
+            done, total = self.counts.get(key, (0, 0))
+            finished = total and done >= total
+            text = f"{done}/{total}" if total else ""
+            label.config(
+                text=text if finished else f"{text} {spin}".strip(),
+                fg=FG if total else MUTED,
+            )
 
     def _finish(self) -> None:
         self.running = False
         self.run_button.config(state="normal", text="Run now")
+        # Clear the spinners the last heartbeat left behind.
+        for key, label in [*self.labels.items(), ("saving", self.save_label)]:
+            done, total = self.counts.get(key, (0, 0))
+            label.config(text=f"{done}/{total}" if total else "-")
         self.refresh_status()
 
     # ── settings ────────────────────────────────────────────────────────────────────────

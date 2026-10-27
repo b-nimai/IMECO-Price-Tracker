@@ -10,6 +10,8 @@ half-written scrape from being read as the current picture.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from datetime import datetime
 from typing import Any
 
@@ -243,7 +245,13 @@ class Store:
         rows = response.json()
         return datetime.fromisoformat(rows[0]["checked_at"]) if rows else None
 
-    def save_search(self, run_id: str, results: list[SearchResult], stored: set[str]) -> int:
+    def save_search(
+        self,
+        run_id: str,
+        results: list[SearchResult],
+        stored: set[str],
+        on_chunk: Callable[[], None] | None = None,
+    ) -> int:
         """One row per search result. `stored` is the SKUs actually in `products`: a match to
         anything else (a competitor an un-migrated database refused) is dropped rather than
         failing the whole write on its foreign key."""
@@ -264,4 +272,6 @@ class Store:
         ]
         for i in range(0, len(rows), CHUNK):
             self._post("search_results", rows[i : i + CHUNK])
+            if on_chunk:
+                on_chunk()
         return len(rows)

@@ -281,8 +281,12 @@ def store_results(
     checks: list[LocationCheck] | None,
     source: str,
     searches: list[SearchResult] | None = None,
+    on_step: Callable[[int, int], None] | None = None,
 ) -> tuple[str, int, str | None]:
     """Write one finished scrape. Shared by the console and the GUI so the two cannot drift.
+
+    `on_step(done, total)` after each write, so the window's Saving bar moves: with a day's
+    search results the save is a dozen-odd requests, long enough to look like a hang.
 
     Returns (run_id, snapshots written, warning). The dark-store and search rows are written
     BEFORE the run is closed, so the dashboard never sees a finished run without them — but a
@@ -291,26 +295,43 @@ def store_results(
     """
     from .store import Store
 
+    from .store import CHUNK
+
     warnings: list[str] = []
+    total = 4 + bool(checks) + (-(-len(searches) // CHUNK) if searches else 0)
+    done = 0
+
+    def step() -> None:
+        nonlocal done
+        done += 1
+        if on_step:
+            on_step(done, total)
+
     with Store(settings) as store:
         stored = store.sync_products(products)
+        step()
         if len(stored) < len(products):
             warnings.append("competitors not stored — run supabase/schema.sql to add them")
             results = [(sku, cell) for sku, cell in results if sku in stored]
             checks = [c for c in checks or [] if c.sku in stored]
         run_id = store.start_run(source)
+        step()
         written = store.save_snapshots(run_id, results)
+        step()
         if checks:
             try:
                 store.save_availability(run_id, checks)
             except RuntimeError as exc:
                 warnings.append(f"dark-store checks not stored — run supabase/schema.sql? ({exc})")
+            step()
         if searches:
             try:
-                store.save_search(run_id, searches, stored)
+                store.save_search(run_id, searches, stored, step)
             except RuntimeError as exc:
                 warnings.append(f"search ranks not stored — run supabase/schema.sql? ({exc})")
         store.finish_run(run_id, [c for _, c in results])
+        if on_step:
+            on_step(total, total)
     return run_id, written, "; ".join(warnings) or None
 
 
