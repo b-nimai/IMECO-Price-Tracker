@@ -61,7 +61,7 @@ export function App() {
     <Tabs value={tab} onValueChange={(next) => setTab(next as Tab)}>
       <TabsList>
         {TABS.map((t) => (
-          <TabsTrigger key={t} value={t} className="px-3 text-xs tracking-widest uppercase">
+          <TabsTrigger key={t} value={t} className="px-2.5 text-xs tracking-wider uppercase">
             {TAB_LABELS[t]}
           </TabsTrigger>
         ))}
