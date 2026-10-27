@@ -103,6 +103,30 @@ export function movers(rows: Row[], limit = 8): Mover[] {
   return out.sort((a, b) => Math.abs(b.change) - Math.abs(a.change)).slice(0, limit);
 }
 
+/**
+ * Today's live price against yesterday's closing price, from `price_daily` — "what moved since
+ * yesterday", which says more than two runs an hour apart.
+ */
+export function dailyMovers(daily: PriceDailyRow[], rows: Row[], limit = 8): Mover[] {
+  const days = [...new Set(daily.map((d) => d.day))].sort();
+  const today = days[days.length - 1];
+  const before = new Map<string, number>();
+  for (const d of daily) {
+    if (d.day === today || d.close_price == null) continue;
+    before.set(`${d.sku}:${d.marketplace}`, d.close_price); // ascending, so the latest day wins
+  }
+  const out: Mover[] = [];
+  for (const row of rows) {
+    for (const m of MARKETPLACES) {
+      const now = live(row.cells[m]);
+      const then = before.get(`${row.sku}:${m}`);
+      if (now == null || then == null || then === now) continue;
+      out.push({ row, marketplace: m, from: then, to: now, change: now / then - 1 });
+    }
+  }
+  return out.sort((a, b) => Math.abs(b.change) - Math.abs(a.change)).slice(0, limit);
+}
+
 export type AlertKind = 'out_of_stock' | 'below_target' | 'undercut' | 'rating_drop' | 'rank_lost';
 
 export interface Alert {

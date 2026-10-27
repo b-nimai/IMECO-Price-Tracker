@@ -21,7 +21,14 @@ import { SchemaNote, Where } from '@/components/listing';
 import { ProductTrendModal } from '@/components/ProductTrendModal';
 import { buildGroups, winLoss } from '@/data/competition';
 import { formatPct, formatPrice } from '@/data/format';
-import { alerts, daySeries, movers, shareOfSearch, type AlertKind } from '@/data/overview';
+import {
+  alerts,
+  dailyMovers,
+  daySeries,
+  movers,
+  shareOfSearch,
+  type AlertKind,
+} from '@/data/overview';
 import {
   fetchAvailability,
   fetchBlinkitStores,
@@ -124,7 +131,11 @@ export default function OverviewView({
     () => new Map((statsRemote?.data ?? []).map((r) => [`${r.sku}:${r.marketplace}`, r])),
     [statsRemote],
   );
-  const moved = useMemo(() => movers(rows), [rows]);
+  // Since yesterday when there is daily history; since the previous run otherwise.
+  const moved = useMemo(
+    () => (daily?.data?.length ? dailyMovers(daily.data, rows) : movers(rows)),
+    [daily, rows],
+  );
   const flagged = useMemo(
     () =>
       alerts({
@@ -411,7 +422,7 @@ export default function OverviewView({
 
       {/* ── bottom row: movers, win/lose, stock, search ── */}
       <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
-        <Panel title="Today’s price moves" icon={TrendingDown}>
+        <Panel title="Price moves since yesterday" icon={TrendingDown}>
           {moved.length ? (
             <BarList
               items={moved.map((mv) => ({
@@ -422,7 +433,9 @@ export default function OverviewView({
                       className="size-1.5 shrink-0 rounded-full"
                       style={{ background: MARKETPLACE_COLORS[mv.marketplace] }}
                     />
-                    <span className="truncate">{mv.row.name}</span>
+                    <span className="truncate" title={mv.row.name}>
+                      {mv.row.name}
+                    </span>
                   </span>
                 ),
                 value: mv.change,
@@ -438,7 +451,7 @@ export default function OverviewView({
             />
           ) : (
             <p className="py-6 text-center text-sm text-muted-foreground">
-              No price changed since the previous run.
+              No price changed since yesterday.
             </p>
           )}
         </Panel>

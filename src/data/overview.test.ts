@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildGroups } from './competition';
-import { alerts, daySeries, movers, shareOfSearch } from './overview';
+import { alerts, dailyMovers, daySeries, movers, shareOfSearch } from './overview';
 import type { PriceDailyRow, SearchResultRow } from './supabaseClient';
 import type { Cell, Marketplace, Row } from './types';
 
@@ -145,5 +145,15 @@ describe('shareOfSearch', () => {
       { brand: 'Beco', slots: 2 },
       { brand: 'Other', slots: 2 },
     ]);
+  });
+});
+
+describe('dailyMovers', () => {
+  it('compares the live price with yesterday’s close', () => {
+    const daily = [day('A', '2026-10-26', 100, 1), day('A', '2026-10-27', 80, 1)];
+    const m = dailyMovers(daily, [row('A', { price: 80 })]);
+    expect(m).toHaveLength(1);
+    expect(m[0].from).toBe(100);
+    expect(m[0].change).toBeCloseTo(-0.2);
   });
 });
