@@ -28,7 +28,14 @@ from .catalogue import load_products
 from .config import load_settings, save_setting
 from .fetch import Fetcher
 from .models import MARKETPLACES, LocationCheck, Product, Status
-from .run import all_stores_due, run_search, scrape, search_wanted, store_results
+from .run import (
+    all_stores_due,
+    run_search,
+    scrape,
+    search_wanted,
+    store_results,
+    write_search_log,
+)
 
 BG = "#111111"
 FG = "#f1f5f9"
@@ -199,15 +206,17 @@ class App:
                 # three bars: with ~70 keywords it is several minutes, and full bars over a
                 # "Running..." button would look like a hang.
                 searches = None
+                problems: list[str] = []
                 if search_wanted(settings):
                     self.events.put(("phase", "Searching keywords (once a day)..."))
-                    searches = run_search(products, fetcher, progress)[0]
+                    searches, problems = run_search(products, fetcher, progress)
+                    write_search_log(searches, problems)
 
             self.events.put(("phase", "Saving to the dashboard..."))
             store_results(settings, products, results, checks, source, searches)
 
             ok = sum(c.status is Status.OK for _, c in results)
-            self.events.put(("done", ok, len(results)))
+            self.events.put(("done", ok, len(results), len(problems)))
         except Exception as exc:  # surfaced in the window rather than a silent death
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
@@ -271,10 +280,15 @@ class App:
                             self.bars[marketplace]["value"] = 0
                             self.labels[marketplace].config(text="-", fg=MUTED)
                 elif event[0] == "done":
-                    _, ok, total = event
-                    self.subtitle.config(
-                        text=f"Done — {ok} live prices saved", fg=ACCENT
-                    )
+                    _, ok, total, problems = event
+                    if problems:
+                        self.subtitle.config(
+                            text=f"Done — {ok} prices saved; {problems} search problems, "
+                            "see last-search.txt",
+                            fg=WARN,
+                        )
+                    else:
+                        self.subtitle.config(text=f"Done — {ok} live prices saved", fg=ACCENT)
                     self._finish()
                 elif event[0] == "error":
                     self.subtitle.config(text=event[1][:70], fg=DANGER)

@@ -25,7 +25,7 @@ from pathlib import Path
 import httpx
 
 from .adapters import PARSERS
-from .catalogue import load_products
+from .catalogue import USER_WORKBOOK, load_products
 from .config import Settings, load_settings
 from .fetch import BLINKIT_LOCATIONS, Fetcher
 from .models import MARKETPLACES, Cell, LocationCheck, Product, Status, Via
@@ -334,6 +334,28 @@ def search_wanted(settings: Settings, force: bool = False) -> bool:
         return False
 
 
+#: Where the last keyword search's problems are written, beside the uploaded sheet. The
+#: button and the scheduled task both run windowless, so without this a marketplace whose
+#: every search failed leaves no trace of why.
+SEARCH_LOG = USER_WORKBOOK.parent / "last-search.txt"
+
+
+def write_search_log(results: list[SearchResult], problems: list[str]) -> Path | None:
+    """Per-marketplace result counts and every problem, overwriting the previous search's."""
+    lines = [f"Keyword search at {datetime.now():%d %b %Y %H:%M}"]
+    for marketplace in MARKETPLACES:
+        found = sum(r.marketplace == marketplace for r in results)
+        lines.append(f"  {marketplace:<9} {found} results")
+    lines += ["", f"{len(problems)} problems:" if problems else "No problems."]
+    lines += [f"  {p}" for p in problems]
+    try:
+        SEARCH_LOG.parent.mkdir(parents=True, exist_ok=True)
+        SEARCH_LOG.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    except OSError:
+        return None  # a log that cannot be written must not cost the run
+    return SEARCH_LOG
+
+
 def run_search(
     products: list[Product], fetcher: Fetcher, on_progress: ProgressFn | None = None
 ) -> tuple[list[SearchResult], list[str]]:
@@ -406,6 +428,7 @@ def main(argv: list[str] | None = None) -> int:
             searches, problems = run_search(products, fetcher)
             for problem in problems:
                 print(f"  ! search: {problem}")
+            write_search_log(searches, problems)
 
     elapsed = time.monotonic() - started
     for marketplace in MARKETPLACES:
