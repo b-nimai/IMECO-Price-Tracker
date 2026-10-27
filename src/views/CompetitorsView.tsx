@@ -1,17 +1,11 @@
-import { ChevronLeft, ChevronRight, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { FilterBox, Where } from '@/components/listing';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Modal } from '@/components/Modal';
+import { listNav, useSticky } from '@/hooks/useModal';
 import {
   Table,
   TableBody,
@@ -20,23 +14,25 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  buildGroups,
+  live,
+  ordinal,
+  standing,
+  type Group,
+  type Standing,
+} from '@/data/competition';
 import { formatPct, formatPrice } from '@/data/format';
 import { fetchRatings, type RatingRow } from '@/data/supabaseClient';
 import {
   MARKETPLACE_LABELS,
   MARKETPLACES,
-  sheetOrder,
   type Cell,
   type Marketplace,
   type Row,
 } from '@/data/types';
 import { useRemote } from '@/hooks/useRemote';
 import { byName, cn } from '@/lib/utils';
-
-/** A live price someone can buy at — the only kind worth comparing. */
-function live(cell: Cell): number | null {
-  return cell.status === 'ok' && cell.price != null ? cell.price : null;
-}
 
 /**
  * One product's price on one marketplace. For a competitor, also how it sits against IMECO's
@@ -76,10 +72,7 @@ function PriceCell({
       {diff != null && diff !== 0 && (
         // From IMECO's side: a rival selling cheaper is the one to notice.
         <span
-          className={cn(
-            'text-xs tabular-nums',
-            diff < 0 ? 'text-warn' : 'text-muted-foreground',
-          )}
+          className={cn('text-xs tabular-nums', diff < 0 ? 'text-warn' : 'text-muted-foreground')}
         >
           {formatPrice(Math.abs(diff))} {diff < 0 ? 'cheaper' : 'dearer'} than IMECO
         </span>
@@ -94,51 +87,6 @@ function PriceCell({
       )}
     </div>
   );
-}
-
-interface Group {
-  ours: Row;
-  rivals: Row[];
-}
-
-/** Where IMECO stands against its rivals on one marketplace, for one product. */
-interface Standing {
-  /** IMECO's live price here, if any. */
-  ours: number | null;
-  /** The cheapest rival live here, if any. */
-  best: { row: Row; price: number } | null;
-  /** IMECO's place among the live prices (1 = cheapest), when IMECO and a rival are both live. */
-  rank: number | null;
-  /** How many live prices that rank is out of, IMECO included. */
-  of: number;
-  /** Rupees IMECO is dearer than the cheapest rival; negative when IMECO is cheaper. */
-  gap: number | null;
-}
-
-function standing({ ours, rivals }: Group, m: Marketplace): Standing {
-  const mine = live(ours.cells[m]);
-  let best: Standing['best'] = null;
-  const theirs: number[] = [];
-  for (const row of rivals) {
-    const price = live(row.cells[m]);
-    if (price == null) continue;
-    theirs.push(price);
-    if (!best || price < best.price) best = { row, price };
-  }
-  if (mine == null || !best) return { ours: mine, best, rank: null, of: theirs.length, gap: null };
-  return {
-    ours: mine,
-    best,
-    rank: 1 + theirs.filter((p) => p < mine).length,
-    of: theirs.length + 1,
-    gap: mine - best.price,
-  };
-}
-
-const ORDINAL = new Intl.PluralRules('en-IN', { type: 'ordinal' });
-const SUFFIX: Record<string, string> = { one: 'st', two: 'nd', few: 'rd', other: 'th' };
-function ordinal(n: number): string {
-  return `${n}${SUFFIX[ORDINAL.select(n)]}`;
 }
 
 /** "₹20 · 10% cheaper" chip: amber when a rival undercuts IMECO, green when IMECO is cheapest. */
@@ -292,131 +240,95 @@ function GroupDialog({
   rated: Map<string, RatingRow>;
   onPick: (sku: string | null) => void;
 }) {
-  const at = group ? groups.indexOf(group) : -1;
-  const prev = at > 0 ? groups[at - 1] : null;
-  const next = at >= 0 && at < groups.length - 1 ? groups[at + 1] : null;
-
+  const shown = useSticky(group);
   return (
-    <Dialog open={group != null} onOpenChange={(open) => !open && onPick(null)}>
-      <DialogContent
-        className="max-w-6xl"
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowLeft' && prev) onPick(prev.ours.sku);
-          if (e.key === 'ArrowRight' && next) onPick(next.ours.sku);
-        }}
-      >
-        {group && (
-          <>
-            <DialogHeader className="flex-row flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <DialogTitle className="text-lg">{group.ours.name}</DialogTitle>
-                <DialogDescription>
-                  {group.ours.sku} · against {group.rivals.length} competitor
-                  {group.rivals.length === 1 ? '' : 's'} · differences are from IMECO’s price on the
-                  same marketplace
-                </DialogDescription>
-              </div>
-              {at >= 0 && (
-                <div className="flex items-center gap-1">
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    disabled={!prev}
-                    onClick={() => prev && onPick(prev.ours.sku)}
-                    aria-label="Previous product"
-                  >
-                    <ChevronLeft />
-                  </Button>
-                  <span className="text-xs text-muted-foreground tabular-nums">
-                    {at + 1} / {groups.length}
+    <Modal
+      open={group != null}
+      onClose={() => onPick(null)}
+      width="xl"
+      title={shown?.ours.name}
+      description={
+        shown &&
+        `${shown.ours.sku} · against ${shown.rivals.length} competitor${
+          shown.rivals.length === 1 ? '' : 's'
+        } · differences are from IMECO’s price on the same marketplace`
+      }
+      nav={listNav(groups, group, (g) => onPick(g.ours.sku), 'product')}
+    >
+      {shown && (
+        <>
+          <div className="mb-4 grid gap-2 sm:grid-cols-3">
+            {MARKETPLACES.map((m) => {
+              const s = standing(shown, m);
+              return (
+                <div
+                  key={m}
+                  className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2.5"
+                >
+                  <Where
+                    marketplace={m}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium"
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {s.rank != null
+                      ? `IMECO is ${ordinal(s.rank)} cheapest of ${s.of}`
+                      : s.ours == null
+                        ? 'IMECO not live here'
+                        : 'No rival live here'}
                   </span>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    disabled={!next}
-                    onClick={() => next && onPick(next.ours.sku)}
-                    aria-label="Next product"
-                  >
-                    <ChevronRight />
-                  </Button>
+                  <GapChip s={s} />
                 </div>
-              )}
-            </DialogHeader>
-            <DialogBody>
-              <div className="mb-4 grid gap-2 sm:grid-cols-3">
-                {MARKETPLACES.map((m) => {
-                  const s = standing(group, m);
-                  return (
-                    <div
-                      key={m}
-                      className="flex flex-col gap-1.5 rounded-lg border border-border px-3 py-2.5"
-                    >
-                      <Where
-                        marketplace={m}
-                        className="inline-flex items-center gap-1.5 text-sm font-medium"
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        {s.rank != null
-                          ? `IMECO is ${ordinal(s.rank)} cheapest of ${s.of}`
-                          : s.ours == null
-                            ? 'IMECO not live here'
-                            : 'No rival live here'}
+              );
+            })}
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[34%]">Product</TableHead>
+                {MARKETPLACES.map((m) => (
+                  <TableHead key={m}>
+                    <Where marketplace={m} className="inline-flex items-center gap-1.5" />
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[shown.ours, ...shown.rivals].map((row, i) => (
+                <TableRow
+                  key={row.sku}
+                  className={cn('align-top', i === 0 && 'bg-primary/10 hover:bg-primary/10')}
+                >
+                  <TableCell className="py-3 whitespace-normal">
+                    <div className="flex flex-col gap-0.5">
+                      <span
+                        className={cn(
+                          'text-xs font-bold tracking-widest uppercase',
+                          i === 0 ? 'text-primary' : 'text-muted-foreground',
+                        )}
+                      >
+                        {row.brand}
                       </span>
-                      <GapChip s={s} />
+                      <span className={cn(i === 0 && 'font-semibold', 'text-foreground')}>
+                        {row.name}
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[34%]">Product</TableHead>
-                    {MARKETPLACES.map((m) => (
-                      <TableHead key={m}>
-                        <Where marketplace={m} className="inline-flex items-center gap-1.5" />
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {[group.ours, ...group.rivals].map((row, i) => (
-                    <TableRow
-                      key={row.sku}
-                      className={cn('align-top', i === 0 && 'bg-primary/10 hover:bg-primary/10')}
-                    >
-                      <TableCell className="py-3 whitespace-normal">
-                        <div className="flex flex-col gap-0.5">
-                          <span
-                            className={cn(
-                              'text-xs font-bold tracking-widest uppercase',
-                              i === 0 ? 'text-primary' : 'text-muted-foreground',
-                            )}
-                          >
-                            {row.brand}
-                          </span>
-                          <span className={cn(i === 0 && 'font-semibold', 'text-foreground')}>
-                            {row.name}
-                          </span>
-                        </div>
-                      </TableCell>
-                      {MARKETPLACES.map((m) => (
-                        <TableCell key={m} className="py-3">
-                          <PriceCell
-                            cell={row.cells[m]}
-                            ours={i === 0 ? null : live(group.ours.cells[m])}
-                            rating={rated.get(`${row.sku}:${m}`)}
-                          />
-                        </TableCell>
-                      ))}
-                    </TableRow>
+                  </TableCell>
+                  {MARKETPLACES.map((m) => (
+                    <TableCell key={m} className="py-3">
+                      <PriceCell
+                        cell={row.cells[m]}
+                        ours={i === 0 ? null : live(shown.ours.cells[m])}
+                        rating={rated.get(`${row.sku}:${m}`)}
+                      />
+                    </TableCell>
                   ))}
-                </TableBody>
-              </Table>
-            </DialogBody>
-          </>
-        )}
-      </DialogContent>
-    </Dialog>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </>
+      )}
+    </Modal>
   );
 }
 
@@ -538,16 +450,7 @@ export default function CompetitorsView({
     [ratings],
   );
 
-  const groups: Group[] = useMemo(() => {
-    const bySku = new Map<string, Row[]>();
-    for (const c of competitors) {
-      if (!c.competitorOf) continue;
-      bySku.set(c.competitorOf, [...(bySku.get(c.competitorOf) ?? []), c]);
-    }
-    return sheetOrder(rows)
-      .filter((r) => bySku.has(r.sku))
-      .map((r) => ({ ours: r, rivals: sheetOrder(bySku.get(r.sku)!) }));
-  }, [rows, competitors]);
+  const groups: Group[] = useMemo(() => buildGroups(rows, competitors), [rows, competitors]);
 
   const shown: Marketplace[] = where === 'all' ? [...MARKETPLACES] : [where];
 

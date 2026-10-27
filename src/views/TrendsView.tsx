@@ -1,18 +1,12 @@
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, TriangleAlert } from 'lucide-react';
+import { ArrowDown, ArrowUp, TriangleAlert } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { FilterBox, SchemaNote, Where } from '@/components/listing';
 import { PriceChart, type Series } from '@/components/PriceChart';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Modal } from '@/components/Modal';
+import { listNav, useSticky } from '@/hooks/useModal';
 import {
   Table,
   TableBody,
@@ -229,11 +223,13 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
 
   // The product whose chart is open in the modal, if any.
   const selected = ordered.find((r) => r.sku === sku) ?? null;
+  // What the sheet shows — the last selection, kept while it slides out after a close.
+  const shown = useSticky(selected);
 
   // The sheet's SP columns are optional; with none filled in, target lines are noise.
   const hasTargets = ordered.some((r) => MARKETPLACES.some((m) => r.cells[m].targetSp));
 
-  const history = useRemote(fetchHistory, selected?.sku ?? null, days);
+  const history = useRemote(fetchHistory, shown?.sku ?? null, days);
   const statsRemote = useRemote(fetchPriceStats);
   const stats = useMemo(
     () =>
@@ -247,22 +243,18 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
   );
 
   const chart = useMemo(() => {
-    if (!selected || !history?.data) return null;
-    const series: Series[] = MARKETPLACES.filter((m) => selected.cells[m].url).map((m) => ({
+    if (!shown || !history?.data) return null;
+    const series: Series[] = MARKETPLACES.filter((m) => shown.cells[m].url).map((m) => ({
       marketplace: m,
-      target: selected.cells[m].targetSp,
+      target: shown.cells[m].targetSp,
       points: history
         .data!.filter((h) => h.marketplace === m)
         .map((h) => ({ t: Date.parse(h.checked_at), price: h.price, status: h.status })),
     }));
     return { series, from: history.at - days * DAY, to: history.at };
-  }, [selected, history, days]);
+  }, [shown, history, days]);
 
   const visible = useMemo(() => byName(ordered, filter), [ordered, filter]);
-  // The arrows (or ← →) step through the table's rows without closing the modal.
-  const at = selected ? visible.indexOf(selected) : -1;
-  const prev = at > 0 ? visible[at - 1] : null;
-  const next = at >= 0 && at < visible.length - 1 ? visible[at + 1] : null;
 
   if (!CONFIGURED) {
     return (
@@ -375,95 +367,61 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
           </Table>
         </CardContent>
       </Card>
-      <Dialog open={selected != null} onOpenChange={(open) => !open && setSku(null)}>
-        <DialogContent
-          className="max-w-6xl"
-          onKeyDown={(e) => {
-            if (e.key === 'ArrowLeft' && prev) setSku(prev.sku);
-            if (e.key === 'ArrowRight' && next) setSku(next.sku);
-          }}
-        >
-          {selected && (
-            <>
-              <DialogHeader className="flex-row flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <DialogTitle className="text-lg">{selected.name}</DialogTitle>
-                  <DialogDescription>
-                    {selected.sku} · price on each marketplace over the last {days} days
-                  </DialogDescription>
+      <Modal
+        open={selected != null}
+        onClose={() => setSku(null)}
+        width="xl"
+        title={shown?.name}
+        description={shown && `${shown.sku} · price on each marketplace over the last ${days} days`}
+        actions={
+          <div className="flex gap-1" role="group" aria-label="Time range">
+            {RANGES.map((r) => (
+              <Button
+                key={r}
+                size="sm"
+                variant={r === days ? 'secondary' : 'ghost'}
+                aria-pressed={r === days}
+                onClick={() => setDays(r)}
+              >
+                {r} days
+              </Button>
+            ))}
+          </div>
+        }
+        nav={listNav(visible, selected, (r) => setSku(r.sku), 'product')}
+      >
+        {shown && (
+          <div className="flex flex-col gap-4">
+            <div className="grid gap-2 sm:grid-cols-3">
+              {MARKETPLACES.map((m) => (
+                <div
+                  key={m}
+                  className="flex flex-col gap-1 rounded-lg border border-border px-3 py-2.5"
+                >
+                  <Where
+                    marketplace={m}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium"
+                  />
+                  <ListingCell
+                    cell={shown.cells[m]}
+                    stats={stats?.data?.get(`${shown.sku}:${m}`)}
+                    showTarget={hasTargets}
+                  />
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex gap-1" role="group" aria-label="Time range">
-                    {RANGES.map((r) => (
-                      <Button
-                        key={r}
-                        size="sm"
-                        variant={r === days ? 'secondary' : 'ghost'}
-                        aria-pressed={r === days}
-                        onClick={() => setDays(r)}
-                      >
-                        {r} days
-                      </Button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      disabled={!prev}
-                      onClick={() => prev && setSku(prev.sku)}
-                      aria-label="Previous product"
-                    >
-                      <ChevronLeft />
-                    </Button>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {at + 1} / {visible.length}
-                    </span>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      disabled={!next}
-                      onClick={() => next && setSku(next.sku)}
-                      aria-label="Next product"
-                    >
-                      <ChevronRight />
-                    </Button>
-                  </div>
-                </div>
-              </DialogHeader>
-              <DialogBody className="flex flex-col gap-4">
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {MARKETPLACES.map((m) => (
-                    <div
-                      key={m}
-                      className="flex flex-col gap-1 rounded-lg border border-border px-3 py-2.5"
-                    >
-                      <Where
-                        marketplace={m}
-                        className="inline-flex items-center gap-1.5 text-sm font-medium"
-                      />
-                      <ListingCell
-                        cell={selected.cells[m]}
-                        stats={stats?.data?.get(`${selected.sku}:${m}`)}
-                        showTarget={hasTargets}
-                      />
-                    </div>
-                  ))}
-                </div>
-                {history?.error ? (
-                  <p className="py-16 text-center text-sm text-destructive">
-                    Could not load history — {history.error.slice(0, 120)}
-                  </p>
-                ) : !chart ? (
-                  <div className="h-[360px] animate-pulse rounded-md bg-muted/30" />
-                ) : (
-                  <PriceChart series={chart.series} from={chart.from} to={chart.to} />
-                )}
-              </DialogBody>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
+              ))}
+            </div>
+            {history?.error ? (
+              <p className="py-16 text-center text-sm text-destructive">
+                Could not load history — {history.error.slice(0, 120)}
+              </p>
+            ) : !chart ? (
+              <div className="h-[360px] animate-pulse rounded-md bg-muted/30" />
+            ) : (
+              <PriceChart series={chart.series} from={chart.from} to={chart.to} />
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

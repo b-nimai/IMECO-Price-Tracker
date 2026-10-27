@@ -194,7 +194,7 @@ export function Sidebar<T extends string>(props: Props<T>) {
         </span>
       </div>
       <Dialog open={drawer} onOpenChange={setDrawer}>
-        <DialogContent className="top-0 left-0 h-dvh max-h-dvh w-72 translate-x-0 translate-y-0 rounded-none border-y-0 border-l-0">
+        <DialogContent side="left" className="max-w-72">
           <DialogTitle className="px-4 pt-4 text-sm tracking-widest text-muted-foreground uppercase">
             Price Tracker
           </DialogTitle>

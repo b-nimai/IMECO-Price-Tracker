@@ -1,18 +1,11 @@
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { FilterBox, SchemaNote, Where } from '@/components/listing';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Modal } from '@/components/Modal';
+import { listNav, useSticky } from '@/hooks/useModal';
 import {
   Table,
   TableBody,
@@ -206,78 +199,38 @@ function ResultsDialog({
   lastDay: string;
   onPick: (k: string | null) => void;
 }) {
-  const at = keyword ? keywords.indexOf(keyword) : -1;
-  const prev = at > 0 ? keywords[at - 1] : null;
-  const next = at >= 0 && at < keywords.length - 1 ? keywords[at + 1] : null;
-
+  const shown = useSticky(keyword);
   return (
-    <Dialog open={keyword != null} onOpenChange={(open) => !open && onPick(null)}>
-      <DialogContent
-        className="h-[min(56rem,calc(100dvh-2rem))] max-w-7xl"
-        onKeyDown={(e) => {
-          if (e.key === 'ArrowLeft' && prev) onPick(prev);
-          if (e.key === 'ArrowRight' && next) onPick(next);
-        }}
-      >
-        <DialogHeader className="flex-row flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <DialogTitle className="text-lg">“{keyword}”</DialogTitle>
-            <DialogDescription>
-              First page of results, searched{' '}
-              {lastDay ? dateLabel.format(Date.parse(lastDay)) : '—'} · IMECO rows highlighted
-            </DialogDescription>
-          </div>
-          {at >= 0 && (
-            <div className="flex items-center gap-1">
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                disabled={!prev}
-                onClick={() => prev && onPick(prev)}
-                aria-label="Previous keyword"
-              >
-                <ChevronLeft />
-              </Button>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {at + 1} / {keywords.length}
-              </span>
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                disabled={!next}
-                onClick={() => next && onPick(next)}
-                aria-label="Next keyword"
-              >
-                <ChevronRight />
-              </Button>
+    <Modal
+      open={keyword != null}
+      onClose={() => onPick(null)}
+      width="xl"
+      flush
+      title={`“${shown ?? ''}”`}
+      description={`First page of results, searched ${
+        lastDay ? dateLabel.format(Date.parse(lastDay)) : '—'
+      } · IMECO rows highlighted`}
+      nav={listNav(keywords, keyword, onPick, 'keyword')}
+    >
+      <div className="grid h-full gap-px bg-border lg:grid-cols-3">
+        {MARKETPLACES.map((m) => (
+          <section key={m} className="flex min-h-0 min-w-0 flex-col bg-background">
+            <div className="flex flex-none items-start justify-between gap-2 border-b border-border px-4 py-3">
+              <Where
+                marketplace={m}
+                className="inline-flex items-center gap-1.5 text-sm font-medium"
+              />
+              {shown && (
+                <RankCell today={today.get(`${shown}:${m}`)} before={before.get(`${shown}:${m}`)} />
+              )}
             </div>
-          )}
-        </DialogHeader>
-        <DialogBody className="p-0">
-          <div className="grid h-full gap-px bg-border lg:grid-cols-3">
-            {MARKETPLACES.map((m) => (
-              <section key={m} className="flex min-h-0 min-w-0 flex-col bg-background">
-                <div className="flex flex-none items-start justify-between gap-2 border-b border-border px-4 py-3">
-                  <Where
-                    marketplace={m}
-                    className="inline-flex items-center gap-1.5 text-sm font-medium"
-                  />
-                  {keyword && (
-                    <RankCell
-                      today={today.get(`${keyword}:${m}`)}
-                      before={before.get(`${keyword}:${m}`)}
-                    />
-                  )}
-                </div>
-                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-                  <ResultsList rows={detail.get(m) ?? []} />
-                </div>
-              </section>
-            ))}
-          </div>
-        </DialogBody>
-      </DialogContent>
-    </Dialog>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              <ResultsList rows={detail.get(m) ?? []} />
+            </div>
+          </section>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
@@ -331,6 +284,7 @@ export default function SearchView() {
 
   // The keyword whose results page is open in the modal, if any.
   const selected = picked && keywords.includes(picked) ? picked : null;
+  const showing = useSticky(selected);
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -340,12 +294,12 @@ export default function SearchView() {
   const detail = useMemo(() => {
     const out = new Map<Marketplace, SearchResultRow[]>();
     for (const r of latest?.data ?? []) {
-      if (r.keyword !== selected) continue;
+      if (r.keyword !== showing) continue;
       const m = r.marketplace as Marketplace;
       out.set(m, [...(out.get(m) ?? []), r]);
     }
     return out;
-  }, [latest, selected]);
+  }, [latest, showing]);
 
   if (!CONFIGURED) {
     return (
