@@ -3,6 +3,8 @@
 
 import { Search } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
+
 import { MARKETPLACE_COLORS, MARKETPLACE_LABELS, type Marketplace } from '@/data/types';
 
 /** Marketplace name with its series dot — the same colour it has in every chart. */
@@ -56,5 +58,34 @@ export function SchemaNote({ view }: { view: string }) {
       This needs the <code>{view}</code> view — run <code>supabase/schema.sql</code> in the Supabase
       SQL editor.
     </p>
+  );
+}
+
+/** Segmented buttons, the same look as the sort switches on the other tabs. */
+export function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: [T, string][];
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div className="flex gap-1" role="group" aria-label={label}>
+      {options.map(([v, text]) => (
+        <Button
+          key={v}
+          size="sm"
+          variant={value === v ? 'secondary' : 'ghost'}
+          aria-pressed={value === v}
+          onClick={() => onChange(v)}
+        >
+          {text}
+        </Button>
+      ))}
+    </div>
   );
 }

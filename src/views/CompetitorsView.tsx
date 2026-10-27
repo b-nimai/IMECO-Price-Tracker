@@ -1,8 +1,7 @@
 import { Star } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import { FilterBox, Where } from '@/components/listing';
-import { Button } from '@/components/ui/button';
+import { FilterBox, Segmented, Where } from '@/components/listing';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/Modal';
 import { listNav, useSticky } from '@/hooks/useModal';
@@ -334,35 +333,6 @@ function GroupDialog({
 
 type Show = 'all' | 'undercut' | 'cheapest';
 type Sort = 'sheet' | 'gap';
-
-/** Segmented buttons, the same look as the sort switches on the other tabs. */
-function Segmented<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: [T, string][];
-  onChange: (next: T) => void;
-}) {
-  return (
-    <div className="flex gap-1" role="group" aria-label={label}>
-      {options.map(([v, text]) => (
-        <Button
-          key={v}
-          size="sm"
-          variant={value === v ? 'secondary' : 'ghost'}
-          aria-pressed={value === v}
-          onClick={() => onChange(v)}
-        >
-          {text}
-        </Button>
-      ))}
-    </div>
-  );
-}
 
 function EmptyState() {
   // As the product sheet itself looks: the same row, with the competitor's columns to the right.

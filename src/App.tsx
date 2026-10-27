@@ -7,10 +7,10 @@ import { Switch } from '@/components/ui/switch';
 import { usePriceData } from '@/hooks/usePriceData';
 import { useHashTab } from '@/hooks/useHashTab';
 import { useTheme } from '@/hooks/useTheme';
-import { HeatmapView } from '@/views/HeatmapView';
 
-// Every page but the board is code-split, so the first paint downloads only what it shows.
+// Every page is code-split, so the first paint downloads only what it shows.
 const OverviewView = lazy(() => import('@/views/OverviewView'));
+const PricesView = lazy(() => import('@/views/PricesView'));
 const TrendsView = lazy(() => import('@/views/TrendsView'));
 const AvailabilityView = lazy(() => import('@/views/AvailabilityView'));
 const ReviewsView = lazy(() => import('@/views/ReviewsView'));
@@ -180,10 +180,6 @@ export function App() {
 
         {!data ? (
           <Skeleton className="min-h-96 flex-1 rounded-xl" />
-        ) : tab === 'prices' ? (
-          <main className="animate-fade-in-up min-h-[32rem] flex-1">
-            <HeatmapView rows={data.rows} showUnlisted={showUnlisted} />
-          </main>
         ) : (
           <main key={tab} className="animate-fade-in-up min-w-0">
             <Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
@@ -195,6 +191,7 @@ export function App() {
                   onNavigate={setTab}
                 />
               )}
+              {tab === 'prices' && <PricesView rows={data.rows} showUnlisted={showUnlisted} />}
               {tab === 'trends' && <TrendsView rows={data.rows} />}
               {tab === 'availability' && <AvailabilityView rows={data.rows} />}
               {tab === 'reviews' && <ReviewsView rows={data.rows} />}

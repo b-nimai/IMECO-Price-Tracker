@@ -76,7 +76,7 @@ export interface Row {
    * The product's row order in the spreadsheet — what the grid sorts on.
    *
    * Null for a SKU the current sheet no longer lists (and for every row on a database that
-   * predates the column). Those sort last; see HeatmapView.
+   * predates the column). Those sort last; see sheetOrder.
    */
   position: number | null;
   /** The spreadsheet's MRP — what the pinned column shows. */
@@ -90,7 +90,7 @@ export interface Row {
    * How many cells actually show a number.
    *
    * Deliberately NOT `liveCount`: an out-of-stock cell still prints its price. This used to
-   * drive the row sort, which is now the sheet's order (see HeatmapView) — it is kept because
+   * drive the row sort, which is now the sheet's order (see sheetOrder) — it is kept because
    * it is the honest measure of how complete a row looks on screen, and nothing else counts it.
    */
   pricedCount: number;
