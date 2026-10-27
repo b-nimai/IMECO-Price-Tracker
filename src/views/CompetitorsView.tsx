@@ -1,6 +1,9 @@
 import { Star } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { BarList } from '@/components/charts/BarList';
+import { Ring } from '@/components/charts/Ring';
+import { StackedBar } from '@/components/charts/StackedBar';
 import { FilterBox, Segmented, Where } from '@/components/listing';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Modal } from '@/components/Modal';
@@ -18,6 +21,7 @@ import {
   live,
   ordinal,
   standing,
+  winLoss,
   type Group,
   type Standing,
 } from '@/data/competition';
@@ -184,43 +188,84 @@ function Scorecard({
   active: boolean;
   onClick: () => void;
 }) {
-  let compared = 0;
-  let cheapest = 0;
-  let undercut = 0;
-  for (const g of groups) {
-    const s = standing(g, marketplace);
-    if (s.gap == null) continue;
-    compared += 1;
-    if (s.gap <= 0) cheapest += 1;
-    else undercut += 1;
-  }
+  const w = winLoss(groups, [marketplace]);
+  const compared = w.cheapest + w.tied + w.undercut;
+  // How far under IMECO the rivals are, on average, where they are cheaper.
+  const gaps = groups
+    .map((g) => standing(g, marketplace))
+    .filter((s) => s.gap != null && s.gap > 0 && s.ours)
+    .map((s) => s.gap! / s.ours!);
+  const avgGap = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : null;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        'flex min-w-48 flex-1 flex-col gap-1 rounded-lg border bg-card/60 px-4 py-3 text-left transition-colors hover:bg-muted/40',
-        active ? 'border-primary ring-1 ring-primary/40' : 'border-border',
+        'card-glass flex min-w-0 flex-col gap-3 rounded-xl px-4 py-3 text-left transition-colors hover:border-primary/50',
+        active && 'border-primary! ring-1 ring-primary/40',
       )}
     >
-      <span className="eyebrow">
-        <Where marketplace={marketplace} className="inline-flex items-center gap-1.5" />
-      </span>
-      <span className="font-mono text-3xl font-bold text-foreground tabular-nums">
-        {compared ? `${cheapest} / ${compared}` : '—'}
-      </span>
-      <span className="text-xs text-muted-foreground">
-        {compared ? (
-          <>
-            products where IMECO is the cheapest ({formatPct(cheapest / compared)})
-            {undercut > 0 && <span className="text-warn"> · undercut on {undercut}</span>}
-          </>
-        ) : (
-          'no product with both IMECO and a competitor live here'
-        )}
-      </span>
+      <div className="flex items-center gap-3">
+        <Ring value={compared ? w.cheapest / compared : null} color="var(--good)" size={56} />
+        <div className="flex min-w-0 flex-col">
+          <Where
+            marketplace={marketplace}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold"
+          />
+          <span className="text-xs text-muted-foreground">
+            {compared
+              ? `IMECO cheapest on ${w.cheapest} of ${compared} products`
+              : 'no product with both IMECO and a rival live'}
+          </span>
+          {avgGap != null && (
+            <span className="text-xs text-warn">
+              rivals cheaper on {w.undercut}, by {formatPct(avgGap)} on average
+            </span>
+          )}
+        </div>
+      </div>
+      <StackedBar
+        height={8}
+        segments={[
+          { label: 'IMECO cheapest', value: w.cheapest, color: 'var(--good)' },
+          { label: 'Tied', value: w.tied, color: 'var(--muted-foreground)' },
+          { label: 'Rival cheaper', value: w.undercut, color: 'var(--warn)' },
+        ]}
+      />
     </button>
+  );
+}
+
+/** The brands that undercut IMECO most often, across every product and marketplace. */
+function RivalBoard({ groups }: { groups: Group[] }) {
+  const counts = new Map<string, number>();
+  for (const g of groups) {
+    for (const m of MARKETPLACES) {
+      const s = standing(g, m);
+      if (s.gap != null && s.gap > 0 && s.best) {
+        counts.set(s.best.row.brand, (counts.get(s.best.row.brand) ?? 0) + 1);
+      }
+    }
+  }
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  return (
+    <div className="card-glass flex min-w-0 flex-col gap-2 rounded-xl px-4 py-3">
+      <span className="eyebrow">Cheapest rival most often</span>
+      {top.length ? (
+        <BarList
+          items={top.map(([brand, n]) => ({
+            key: brand,
+            label: brand,
+            value: n,
+            display: `${n}×`,
+            color: 'var(--warn)',
+          }))}
+        />
+      ) : (
+        <span className="text-xs text-muted-foreground">No rival is cheaper anywhere.</span>
+      )}
+    </div>
   );
 }
 
@@ -455,8 +500,8 @@ export default function CompetitorsView({
   const open = visible.find((g) => g.ours.sku === picked) ?? null;
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {MARKETPLACES.map((m) => (
           <Scorecard
             key={m}
@@ -466,6 +511,7 @@ export default function CompetitorsView({
             onClick={() => setWhere(where === m ? 'all' : m)}
           />
         ))}
+        <RivalBoard groups={groups} />
       </div>
 
       <Card className="card-glass min-w-0">
