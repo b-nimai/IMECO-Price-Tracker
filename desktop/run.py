@@ -3,8 +3,11 @@
     python -m desktop.run                 # scrape and store
     python -m desktop.run --dry-run       # scrape, print, store nothing
     python -m desktop.run --source scheduled
-    python -m desktop.run --all-stores    # also check every Blinkit dark store, whatever the hour
-    python -m desktop.run --search        # also run the daily keyword search now
+    python -m desktop.run --full          # every competitor and every Blinkit store this run
+    python -m desktop.run --search        # search every keyword now
+
+Each run prices every IMECO listing; competitors, the dark-store walk and the keyword search
+are spread over runs (see ROTATION and KEYWORDS_PER_RUN).
 
 Hosts run in parallel; listings within a host run sequentially behind the throttle in
 `fetch.py`. That shape is the point — it keeps per-host request rates polite while still
@@ -19,6 +22,8 @@ import sys
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,24 +34,55 @@ from .catalogue import USER_WORKBOOK, load_products
 from .config import Settings, load_settings
 from .fetch import BLINKIT_LOCATIONS, Fetcher
 from .models import MARKETPLACES, Cell, LocationCheck, Product, Status, Via
-from .search import DEFAULT_KEYWORDS, SearchResult, load_keywords, search, search_due
+from .search import (
+    DEFAULT_KEYWORDS,
+    SEARCH_FROM_HOUR,
+    SearchResult,
+    load_keywords,
+    search,
+)
 
 ProgressFn = Callable[[str, int, int], None]
 """(marketplace, done, total) — called after each listing so the GUI can draw a bar."""
 
-#: Every this many hours, a run asks EVERY Blinkit dark store about every listing instead of
-#: stopping at the first with stock. That full walk is ~6x the Blinkit requests (~11 minutes
-#: behind the throttle for 17 listings), which is fine a few times a day and wasteful hourly —
-#: which store has stock does not change minute to minute.
-ALL_STORES_EVERY_HOURS = 3
+#: What a run fetches, by how fresh it needs to be. IMECO's own listings — prices, stock and
+#: the ratings read off the same pages — are the dashboard's core and are fetched EVERY run.
+#: Competitor prices and the Blinkit every-store walk move slowly, so each run takes only one
+#: of ROTATION slices of them: every competitor and every store is still read every ROTATION
+#: hours, and an hourly run stays ~8-12 minutes instead of 14-26 with everything at once.
+ROTATION = 3
+
+#: The daily keyword search is spread over the morning the same way: at most this many keywords
+#: a run, from SEARCH_FROM_HOUR, until every keyword has been searched today.
+KEYWORDS_PER_RUN = 25
 
 
-def all_stores_due(now: datetime | None = None) -> bool:
-    """Whether this run should do the full dark-store walk. On the hour 0, 3, 6, ... 21 —
-    clock-based rather than "since the last walk" so it needs no state, and an hourly schedule
-    over a working day hits 9, 12, 15 and 18."""
-    now = now or datetime.now()
-    return now.hour % ALL_STORES_EVERY_HOURS == 0
+def rotation_slot(now: datetime | None = None) -> int:
+    """Which slice this run takes: the hour of the day, round-robin."""
+    return (now or datetime.now()).hour % ROTATION
+
+
+def _in_slot(items: list[Product], slot: int) -> set[str]:
+    """Deal `items` round-robin into ROTATION equal slices (in SKU order, so a product keeps
+    its slice from run to run) and return the SKUs in `slot`."""
+    ordered = sorted(p.sku for p in items)
+    return {sku for i, sku in enumerate(ordered) if i % ROTATION == slot}
+
+
+def plan_run(
+    products: list[Product], now: datetime | None = None, full: bool = False
+) -> tuple[list[Product], set[str]]:
+    """(the products to price this run, the IMECO SKUs to ask every Blinkit store about).
+
+    Every IMECO product, plus this hour's third of the competitors; with `full`, everything.
+    """
+    slot = rotation_slot(now)
+    rivals = [p for p in products if p.competitor_of]
+    own_blinkit = [p for p in products if not p.competitor_of and p.url_for("blinkit")]
+    rival_due = {p.sku for p in rivals} if full else _in_slot(rivals, slot)
+    walk = {p.sku for p in own_blinkit} if full else _in_slot(own_blinkit, slot)
+    due = [p for p in products if not p.competitor_of or p.sku in rival_due]
+    return due, walk
 
 
 def _fetch_one(
@@ -153,17 +189,22 @@ def _scrape_marketplace(
     fetcher: Fetcher,
     on_progress: ProgressFn | None,
     checks: list[LocationCheck] | None = None,
+    walk: set[str] | None = None,
+    walk_only: list[Product] = (),  # type: ignore[assignment]
 ) -> list[tuple[str, Cell]]:
     listed = [p for p in products if p.url_for(marketplace)]
+    if marketplace == "blinkit":
+        listed += [p for p in walk_only if p.url_for("blinkit")]
     total = len(listed)
     out: list[tuple[str, Cell]] = []
 
     for i, product in enumerate(listed, start=1):
         url = product.url_for(marketplace) or ""
         if marketplace == "blinkit":
-            # Only IMECO's own listings get the every-store walk: with a few competitors per
-            # product it would be ~500 requests, close to an hour behind the throttle.
-            own = None if product.competitor_of else checks
+            # Only IMECO's own listings get the every-store walk (with a few competitors per
+            # product it would be ~500 requests), and only those in this run's `walk` slice.
+            due = not product.competitor_of and (walk is None or product.sku in walk)
+            own = checks if due else None
             cell = _fetch_blinkit(url, fetcher, product.sku, own)
         else:
             cell = _fetch_one(marketplace, url, fetcher)
@@ -180,11 +221,16 @@ def scrape(
     fetcher: Fetcher,
     on_progress: ProgressFn | None = None,
     checks: list[LocationCheck] | None = None,
+    walk: set[str] | None = None,
+    walk_only: list[Product] = (),  # type: ignore[assignment]
 ) -> list[tuple[str, Cell]]:
     """Fetch every listed product on every marketplace.
 
-    Pass a `checks` list to also ask every Blinkit dark store (see `_fetch_blinkit`); it is
-    filled in place.
+    `walk_only` products are asked of every Blinkit store for `checks` and nothing else; their
+    cells are left out of the result (the run has already priced them).
+
+    Pass a `checks` list to also ask every Blinkit dark store (see `_fetch_blinkit`) about the
+    IMECO SKUs in `walk` (all of them when `walk` is None); it is filled in place.
     """
     results: list[tuple[str, Cell]] = []
 
@@ -192,11 +238,14 @@ def scrape(
     # anyway — and any fewer would leave hosts idle.
     with ThreadPoolExecutor(max_workers=len(MARKETPLACES)) as pool:
         futures = [
-            pool.submit(_scrape_marketplace, m, products, fetcher, on_progress, checks)
+            pool.submit(
+                _scrape_marketplace, m, products, fetcher, on_progress, checks, walk, walk_only
+            )
             for m in MARKETPLACES
         ]
+        skip = {p.sku for p in walk_only}
         for future in futures:
-            results.extend(future.result())
+            results.extend((sku, cell) for sku, cell in future.result() if sku not in skip)
 
     # Products with no URL on a marketplace were never fetched, but the dashboard still needs
     # a cell for them — otherwise "we never looked" is indistinguishable from "the fetch
@@ -274,85 +323,159 @@ def write_fixture(path: Path, products: list[Product], results: list[tuple[str, 
     path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
 
 
-def store_results(
+PhaseFn = Callable[[str, bool], None]
+"""(what the run is doing now, whether the progress bars start over for it)."""
+
+
+@dataclass
+class RunReport:
+    results: list[tuple[str, Cell]] = field(default_factory=list)
+    checks: list[LocationCheck] = field(default_factory=list)
+    searches: list[SearchResult] | None = None
+    #: Keyword-search problems, also written to SEARCH_LOG.
+    problems: list[str] = field(default_factory=list)
+    #: Parts that could not be stored (a missing table) — the prices still were.
+    warnings: list[str] = field(default_factory=list)
+    run_id: str | None = None
+    stored: int = 0
+
+
+def execute_run(
     settings: Settings,
     products: list[Product],
-    results: list[tuple[str, Cell]],
-    checks: list[LocationCheck] | None,
-    source: str,
-    searches: list[SearchResult] | None = None,
-    on_step: Callable[[int, int], None] | None = None,
-) -> tuple[str, int, str | None]:
-    """Write one finished scrape. Shared by the console and the GUI so the two cannot drift.
+    *,
+    source: str = "manual",
+    full: bool = False,
+    force_search: bool = False,
+    dry_run: bool = False,
+    on_progress: ProgressFn | None = None,
+    on_phase: PhaseFn | None = None,
+    on_saved: Callable[[int, int], None] | None = None,
+) -> RunReport:
+    """One run, most important first, each stage SAVED as soon as it is fetched:
 
-    `on_step(done, total)` after each write, so the window's Saving bar moves: with a day's
-    search results the save is a dozen-odd requests, long enough to look like a hang.
+    1. every IMECO listing — prices, stock and ratings — so the dashboard updates within
+       minutes;
+    2. this hour's third of the competitors, and of the Blinkit every-store walk;
+    3. the keywords still due today.
 
-    Returns (run_id, snapshots written, warning). The dark-store and search rows are written
-    BEFORE the run is closed, so the dashboard never sees a finished run without them — but a
-    failure to write them is only a warning: they are their tabs' extra detail, and must never
-    cost the board its prices.
+    The run row is opened before stage 1 and closed after stage 3; the dashboard reads the
+    newest snapshot per listing, so each stage shows up the moment it is written. A stage that
+    cannot be stored (a table the database does not have yet) is a warning, never a lost run.
+    Shared by the window and the scheduled task, so the two cannot drift.
     """
     from .store import Store
 
-    from .store import CHUNK
+    phase = on_phase or (lambda text, reset: None)
+    report = RunReport()
+    due, walk = plan_run(products, full=full)
+    own = [p for p in due if not p.competitor_of]
+    rivals = [p for p in due if p.competitor_of]
+    walk_only = [p for p in own if p.sku in walk]
+    keywords: list[tuple[str, tuple[str, ...]]] = []
+    if not dry_run or force_search:
+        keywords, report.problems = keywords_due(settings, products, force_search)
+    stages = 1 + bool(rivals or walk_only) + bool(keywords)
+    saved = 0
 
-    warnings: list[str] = []
-    total = 4 + bool(checks) + (-(-len(searches) // CHUNK) if searches else 0)
-    done = 0
+    def stage_saved() -> None:
+        nonlocal saved
+        saved += 1
+        if on_saved:
+            on_saved(saved, stages)
 
-    def step() -> None:
-        nonlocal done
-        done += 1
-        if on_step:
-            on_step(done, total)
+    with ExitStack() as stack:
+        fetcher = stack.enter_context(Fetcher(settings))
+        store = None if dry_run else stack.enter_context(Store(settings))
+        stored: set[str] = set()
+        if store:
+            stored = store.sync_products(products)
+            if len(stored) < len(products):
+                report.warnings.append("competitors not stored — run supabase/schema.sql")
+            report.run_id = store.start_run(source)
 
-    with Store(settings) as store:
-        stored = store.sync_products(products)
-        step()
-        if len(stored) < len(products):
-            warnings.append("competitors not stored — run supabase/schema.sql to add them")
-            results = [(sku, cell) for sku, cell in results if sku in stored]
-            checks = [c for c in checks or [] if c.sku in stored]
-        run_id = store.start_run(source)
-        step()
-        written = store.save_snapshots(run_id, results)
-        step()
-        if checks:
-            try:
-                store.save_availability(run_id, checks)
-            except RuntimeError as exc:
-                warnings.append(f"dark-store checks not stored — run supabase/schema.sql? ({exc})")
-            step()
-        if searches:
-            try:
-                store.save_search(run_id, searches, stored, step)
-            except RuntimeError as exc:
-                warnings.append(f"search ranks not stored — run supabase/schema.sql? ({exc})")
-        store.finish_run(run_id, [c for _, c in results])
-        if on_step:
-            on_step(total, total)
-    return run_id, written, "; ".join(warnings) or None
+        def save(results: list[tuple[str, Cell]]) -> None:
+            if store and report.run_id:
+                keep = [(sku, cell) for sku, cell in results if sku in stored]
+                report.stored += store.save_snapshots(report.run_id, keep)
+
+        phase(f"IMECO prices and stock ({len(own)} products)", True)
+        first = scrape(own, fetcher, on_progress)
+        report.results += first
+        phase("Saving IMECO prices", False)
+        save(first)
+        stage_saved()
+
+        if rivals or walk_only:
+            phase(f"{len(rivals)} competitors and {len(walk_only)} dark-store checks", True)
+            second = scrape(
+                rivals, fetcher, on_progress, report.checks, {p.sku for p in walk_only}, walk_only
+            )
+            report.results += second
+            phase("Saving competitors", False)
+            save(second)
+            checks = [c for c in report.checks if c.sku in stored]
+            if store and report.run_id and checks:
+                try:
+                    store.save_availability(report.run_id, checks)
+                except RuntimeError as exc:
+                    report.warnings.append(f"dark-store checks not stored ({exc})")
+            stage_saved()
+
+        if keywords:
+            phase(f"Searching {len(keywords)} keywords", True)
+            report.searches, issues = run_search(keywords, products, fetcher, on_progress)
+            report.problems += issues
+            write_search_log(report.searches, report.problems)
+            phase("Saving search ranks", False)
+            if store and report.run_id:
+                try:
+                    store.save_search(report.run_id, report.searches, stored)
+                except RuntimeError as exc:
+                    report.warnings.append(f"search ranks not stored ({exc})")
+            stage_saved()
+
+        if store and report.run_id:
+            store.finish_run(report.run_id, [c for _, c in report.results])
+    return report
 
 
-def search_wanted(settings: Settings, force: bool = False) -> bool:
-    """Whether this run should also do the daily keyword search (see desktop/search.py).
+def keywords_due(
+    settings: Settings, products: list[Product], force: bool = False
+) -> tuple[list[tuple[str, tuple[str, ...]]], list[str]]:
+    """(keywords to search this run, with the marketplaces still missing for each; problems).
 
-    Asks the database when the last one was, so it happens once a day whenever the PC is on
-    after 9 — never on a dry run unless forced, and never against a database that has no
-    `search_results` table yet (that would spend ~60 requests to store nothing).
+    From SEARCH_FROM_HOUR, each run searches up to KEYWORDS_PER_RUN keywords that have not
+    been searched today — so the daily search is spread over the first few morning runs, and a
+    PC that was off at 9 simply catches up later. Asks the database what today already has;
+    if it cannot, it searches nothing (never the whole list behind every price run).
+    `force` searches every keyword.
     """
+    problems: list[str] = []
+    try:
+        keywords = load_keywords(products=products)
+    except Exception as exc:
+        problems.append(f"{exc} — searched the default keywords instead")
+        keywords = [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
     if force:
-        return True
-    if not settings.can_store:
-        return False
+        return keywords, problems
+    if datetime.now().hour < SEARCH_FROM_HOUR or not settings.can_store:
+        return [], problems
     from .store import Store
 
     try:
         with Store(settings) as store:
-            return search_due(store.last_search_at())
+            done = store.searched_today()
     except (RuntimeError, httpx.HTTPError):
-        return False
+        return [], problems
+    due: list[tuple[str, tuple[str, ...]]] = []
+    for keyword, where in keywords:
+        missing = tuple(m for m in where if (keyword, m) not in done)
+        if missing:
+            due.append((keyword, missing))
+        if len(due) >= KEYWORDS_PER_RUN:
+            break
+    return due, problems
 
 
 #: Where the last keyword search's problems are written, beside the uploaded sheet. The
@@ -378,21 +501,13 @@ def write_search_log(results: list[SearchResult], problems: list[str]) -> Path |
 
 
 def run_search(
-    products: list[Product], fetcher: Fetcher, on_progress: ProgressFn | None = None
+    keywords: list[tuple[str, tuple[str, ...]]],
+    products: list[Product],
+    fetcher: Fetcher,
+    on_progress: ProgressFn | None = None,
 ) -> tuple[list[SearchResult], list[str]]:
-    """The daily keyword search, with the workbook's keywords (or the defaults).
-
-    Never raises for a workbook problem: a Keywords sheet it cannot read falls back to the
-    default keywords, with the reason reported, so a typo in a header costs nothing but a note.
-    """
-    problems: list[str] = []
-    try:
-        keywords = load_keywords(products=products)
-    except Exception as exc:
-        problems.append(f"{exc} — searched the default keywords instead")
-        keywords = [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
-    results, issues = search(keywords, fetcher, products, on_progress)
-    return results, problems + issues
+    """Search `keywords` (from `keywords_due`) on their marketplaces."""
+    return search(keywords, fetcher, products, on_progress)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -406,14 +521,16 @@ def main(argv: list[str] | None = None) -> int:
         "without a database (used for public/demo-prices.json)",
     )
     parser.add_argument(
-        "--all-stores",
+        "--full",
         action="store_true",
-        help=f"ask every Blinkit dark store this run (otherwise every {ALL_STORES_EVERY_HOURS}h)",
+        help=f"price every competitor and ask every Blinkit store this run "
+        f"(otherwise one of {ROTATION} slices a run)",
     )
     parser.add_argument(
         "--search",
         action="store_true",
-        help="run the keyword search this run (otherwise once a day, first run after 9)",
+        help=f"search every keyword this run (otherwise up to {KEYWORDS_PER_RUN} a run from "
+        f"{SEARCH_FROM_HOUR}:00 until all are done today)",
     )
     args = parser.parse_args(argv)
 
@@ -435,21 +552,18 @@ def main(argv: list[str] | None = None) -> int:
         args.dry_run = True
     print()
 
-    checks: list[LocationCheck] | None = [] if args.all_stores or all_stores_due() else None
-    if checks is not None:
-        print(f"checking all {len(BLINKIT_LOCATIONS)} Blinkit dark stores this run")
-
-    do_search = search_wanted(settings, args.search) and not (args.dry_run and not args.search)
-    searches: list[SearchResult] | None = None
-
-    with Fetcher(settings) as fetcher:
-        results = scrape(products, fetcher, checks=checks)
-        if do_search:
-            print("running the daily keyword search")
-            searches, problems = run_search(products, fetcher)
-            for problem in problems:
-                print(f"  ! search: {problem}")
-            write_search_log(searches, problems)
+    report = execute_run(
+        settings,
+        products,
+        source=args.source,
+        full=args.full,
+        force_search=args.search,
+        dry_run=args.dry_run,
+        on_phase=lambda text, _reset: print(f"[{time.monotonic() - started:5.0f}s] {text}"),
+    )
+    results, searches = report.results, report.searches
+    for problem in report.problems:
+        print(f"  ! search: {problem}")
 
     elapsed = time.monotonic() - started
     for marketplace in MARKETPLACES:
@@ -470,18 +584,13 @@ def main(argv: list[str] | None = None) -> int:
         print("dry run — nothing written to Supabase")
         return 0
 
-    run_id, written, warning = store_results(
-        settings, products, results, checks, args.source, searches
+    print(
+        f"\nstored {report.stored} snapshots, {len(report.checks)} dark-store checks "
+        f"(run {report.run_id})"
     )
-    print(f"\nstored {written} snapshots (run {run_id})")
-    if checks and not warning:
-        print(f"stored {len(checks)} dark-store checks")
-    if searches and not warning:
-        print(f"stored {len(searches)} search results")
-    if warning:
+    for warning in report.warnings:
         print(f"  ! {warning}")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

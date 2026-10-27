@@ -306,16 +306,6 @@ def load_keywords(
     return out or [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
 
 
-def search_due(last: datetime | None, now: datetime | None = None) -> bool:
-    """Once a day, on the first run from SEARCH_FROM_HOUR. Keyed on the last search actually
-    stored rather than on the clock alone, so a PC that was off at 9 searches at 10 instead of
-    skipping the day."""
-    now = now or datetime.now()
-    if now.hour < SEARCH_FROM_HOUR:
-        return False
-    return last is None or last.astimezone().date() < now.date()
-
-
 # ── doing it ────────────────────────────────────────────────────────────────────────────
 
 

@@ -27,16 +27,8 @@ from tkinter import filedialog, messagebox, ttk
 from . import catalogue, schedule
 from .catalogue import load_products
 from .config import load_settings, save_setting
-from .fetch import Fetcher
-from .models import MARKETPLACES, LocationCheck, Product, Status
-from .run import (
-    all_stores_due,
-    run_search,
-    scrape,
-    search_wanted,
-    store_results,
-    write_search_log,
-)
+from .models import MARKETPLACES, Product, Status
+from .run import execute_run
 
 BG = "#111111"
 FG = "#f1f5f9"
@@ -224,29 +216,20 @@ class App:
                 self.events.put(("progress", marketplace, done, total))
 
             # The scheduled task runs the exe with --silent, which goes through run.main; this
-            # is the button. Both follow the same every-few-hours dark-store cadence.
-            checks: list[LocationCheck] | None = [] if all_stores_due() else None
-
-            with Fetcher(settings) as fetcher:
-                results = scrape(products, fetcher, progress, checks)
-                # The daily keyword search, if today's has not happened yet. It reuses the
-                # three bars: with ~70 keywords it is several minutes, and full bars over a
-                # "Running..." button would look like a hang.
-                searches = None
-                problems: list[str] = []
-                if search_wanted(settings):
-                    self.events.put(("phase", "Searching keywords (once a day)"))
-                    searches, problems = run_search(products, fetcher, progress)
-                    write_search_log(searches, problems)
-
-            self.events.put(("phase", "Saving to the dashboard"))
-            store_results(
-                settings, products, results, checks, source, searches,
-                lambda done, total: self.events.put(("saving", done, total)),
+            # is the button. Both run the same stages — IMECO first and saved at once, then this
+            # hour's competitors and dark stores, then the keywords still due today — and each
+            # stage restarts the three bars, so a long run never sits on full bars.
+            report = execute_run(
+                settings,
+                products,
+                source=source,
+                on_progress=progress,
+                on_phase=lambda text, reset: self.events.put(("phase", text, reset)),
+                on_saved=lambda done, total: self.events.put(("saving", done, total)),
             )
 
-            ok = sum(c.status is Status.OK for _, c in results)
-            self.events.put(("done", ok, len(results), len(problems)))
+            ok = sum(c.status is Status.OK for _, c in report.results)
+            self.events.put(("done", ok, len(report.results), len(report.problems)))
         except Exception as exc:  # surfaced in the window rather than a silent death
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
@@ -305,7 +288,7 @@ class App:
                     self.counts[marketplace] = (done, total)
                 elif event[0] == "phase":
                     self.phase = event[1]
-                    if event[1].startswith("Searching"):
+                    if event[2]:
                         for marketplace in MARKETPLACES:
                             self.bars[marketplace]["value"] = 0
                             self.counts.pop(marketplace, None)

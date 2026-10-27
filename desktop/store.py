@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -233,17 +233,17 @@ class Store:
 
     # ── search ranks ────────────────────────────────────────────────────────────────────
 
-    def last_search_at(self) -> datetime | None:
-        """When the daily keyword search last ran, or None if never. Raises RuntimeError if the
-        `search_results` table does not exist yet."""
+    def searched_today(self) -> set[tuple[str, str]]:
+        """(keyword, marketplace) pairs already searched today, India time — so the daily
+        search can be spread over several runs. Raises RuntimeError if the view is missing."""
+        today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date().isoformat()
         response = self._client.get(
-            f"{self._base}/search_results",
-            params={"select": "checked_at", "order": "checked_at.desc", "limit": "1"},
+            f"{self._base}/search_rank_daily",
+            params={"select": "keyword,marketplace", "day": f"eq.{today}"},
         )
         if response.status_code >= 400:
-            raise RuntimeError(f"search_results read failed [{response.status_code}]")
-        rows = response.json()
-        return datetime.fromisoformat(rows[0]["checked_at"]) if rows else None
+            raise RuntimeError(f"search_rank_daily read failed [{response.status_code}]")
+        return {(r["keyword"], r["marketplace"]) for r in response.json()}
 
     def save_search(
         self,
