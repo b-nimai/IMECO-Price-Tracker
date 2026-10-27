@@ -62,39 +62,37 @@ function RankCell({
   const moved = now && then && !now.ad && !then.ad ? then.rank - now.rank : 0;
 
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="inline-flex items-baseline gap-2">
-        {now ? (
-          <span
-            className={cn(
-              'text-base font-semibold tabular-nums',
-              now.rank <= 10 ? 'text-foreground' : 'text-muted-foreground',
-            )}
-          >
-            #{now.rank}
-            {now.ad && <span className="ml-1 text-xs font-normal">(ad only)</span>}
-          </span>
-        ) : (
-          <span className="text-sm text-muted-foreground">Not in top {today.results}</span>
-        )}
-        {moved > 0 && (
-          <span className="inline-flex items-center text-xs font-medium text-emerald-400">
-            <ArrowUp className="size-3" aria-hidden />
-            {moved}
-          </span>
-        )}
-        {moved < 0 && (
-          <span className="inline-flex items-center text-xs font-medium text-amber-400">
-            <ArrowDown className="size-3" aria-hidden />
-            {-moved}
-          </span>
-        )}
-      </span>
+    <span className="inline-flex flex-wrap items-baseline gap-x-2 text-sm">
+      {now ? (
+        <span
+          className={cn(
+            'font-semibold tabular-nums',
+            now.rank <= 10 ? 'text-foreground' : 'text-muted-foreground',
+          )}
+        >
+          #{now.rank}
+          {now.ad && <span className="ml-1 text-xs font-normal">(ad only)</span>}
+        </span>
+      ) : (
+        <span className="text-muted-foreground">Not in top {today.results}</span>
+      )}
+      {moved > 0 && (
+        <span className="inline-flex items-center text-xs font-medium text-emerald-400">
+          <ArrowUp className="size-3" aria-hidden />
+          {moved}
+        </span>
+      )}
+      {moved < 0 && (
+        <span className="inline-flex items-center text-xs font-medium text-amber-400">
+          <ArrowDown className="size-3" aria-hidden />
+          {-moved}
+        </span>
+      )}
       <span className="text-xs text-muted-foreground tabular-nums">
-        {today.imeco_top10} of top {Math.min(10, today.top10)}
+        {today.imeco_top10}/{Math.min(10, today.top10)} in top 10
         {today.imeco_ads > 0 && ` · ${today.imeco_ads} ad${today.imeco_ads === 1 ? '' : 's'}`}
       </span>
-    </div>
+    </span>
   );
 }
 
@@ -109,11 +107,11 @@ function Scorecard({
   const pageOne = mine.filter((d) => (rankOf(d)?.rank ?? Infinity) <= 10).length;
   const advertised = mine.filter((d) => d.imeco_ads > 0).length;
   return (
-    <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-lg border border-border bg-card/60 px-4 py-3">
+    <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-lg border border-border bg-card/60 px-4 py-2">
       <span className="eyebrow">
         <Where marketplace={marketplace} className="inline-flex items-center gap-1.5" />
       </span>
-      <span className="font-mono text-3xl font-bold text-foreground tabular-nums">
+      <span className="font-mono text-2xl font-bold text-foreground tabular-nums">
         {mine.length ? `${pageOne} / ${mine.length}` : '—'}
       </span>
       <span className="text-xs text-muted-foreground">
@@ -400,19 +398,19 @@ export default function SearchView() {
                 <TableRow
                   key={k}
                   className={cn(
-                    'cursor-pointer align-top',
+                    'cursor-pointer',
                     k === selected && 'bg-muted/50 hover:bg-muted/50',
                   )}
                   onClick={() => setPicked(k)}
                   aria-selected={k === selected}
                 >
-                  <TableCell className="py-3 font-medium text-foreground">
+                  <TableCell className="py-1.5 text-sm font-medium text-foreground">
                     <span className={cn(k === selected && 'border-l-2 border-primary pl-2')}>
                       {k}
                     </span>
                   </TableCell>
                   {MARKETPLACES.map((m) => (
-                    <TableCell key={m} className="py-3">
+                    <TableCell key={m} className="py-1.5">
                       <RankCell today={today.get(`${k}:${m}`)} before={before.get(`${k}:${m}`)} />
                     </TableCell>
                   ))}

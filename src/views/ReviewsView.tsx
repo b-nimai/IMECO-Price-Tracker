@@ -36,35 +36,31 @@ function RatingCell({ r }: { r: RatingRow | undefined }) {
   const added = r.count_then != null && r.rating_count != null ? r.rating_count - r.count_then : 0;
 
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="inline-flex items-center gap-1.5">
-        <Star className="size-4 fill-amber-400 text-amber-400" aria-hidden />
-        <span className="text-base font-semibold text-foreground tabular-nums">
-          {r.rating.toFixed(1)}
-        </span>
-        {change <= -DROP_FLAG && (
-          <span
-            className="inline-flex items-center gap-0.5 text-xs font-medium text-amber-400"
-            title={`Was ${r.rating_then?.toFixed(1)} on ${dateLabel.format(Date.parse(r.then_at!))}`}
-          >
-            <ArrowDown className="size-3" aria-hidden />
-            {Math.abs(change).toFixed(1)} since {dateLabel.format(Date.parse(r.then_at!))}
-          </span>
-        )}
-        {change >= DROP_FLAG && (
-          <span className="inline-flex items-center gap-0.5 text-xs font-medium text-emerald-400">
-            <ArrowUp className="size-3" aria-hidden />
-            {change.toFixed(1)}
-          </span>
-        )}
-      </span>
+    <span className="inline-flex flex-wrap items-center gap-x-1.5 text-sm">
+      <Star className="size-3.5 fill-amber-400 text-amber-400" aria-hidden />
+      <span className="font-semibold text-foreground tabular-nums">{r.rating.toFixed(1)}</span>
       {r.rating_count != null && (
         <span className="text-xs text-muted-foreground tabular-nums">
-          {formatAmount(r.rating_count)} ratings
-          {added > 0 && ` · +${formatAmount(added)} in 30 days`}
+          ({formatAmount(r.rating_count)}
+          {added > 0 && `, +${formatAmount(added)} in 30d`})
         </span>
       )}
-    </div>
+      {change <= -DROP_FLAG && (
+        <span
+          className="inline-flex items-center gap-0.5 text-xs font-medium text-amber-400"
+          title={`Was ${r.rating_then?.toFixed(1)} on ${dateLabel.format(Date.parse(r.then_at!))}`}
+        >
+          <ArrowDown className="size-3" aria-hidden />
+          {Math.abs(change).toFixed(1)} since {dateLabel.format(Date.parse(r.then_at!))}
+        </span>
+      )}
+      {change >= DROP_FLAG && (
+        <span className="inline-flex items-center gap-0.5 text-xs font-medium text-emerald-400">
+          <ArrowUp className="size-3" aria-hidden />
+          {change.toFixed(1)}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -75,11 +71,11 @@ function Scorecard({ marketplace, rows }: { marketplace: Marketplace; rows: Rati
   const total = mine.reduce((n, r) => n + (r.rating_count ?? 0), 0);
   const low = mine.filter((r) => r.rating < 4).length;
   return (
-    <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-lg border border-border bg-card/60 px-4 py-3">
+    <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-lg border border-border bg-card/60 px-4 py-2">
       <span className="eyebrow">{MARKETPLACE_LABELS[marketplace]}</span>
       <span className="inline-flex items-center gap-2">
-        <Star className="size-6 fill-amber-400 text-amber-400" aria-hidden />
-        <span className="font-mono text-3xl font-bold text-foreground tabular-nums">
+        <Star className="size-5 fill-amber-400 text-amber-400" aria-hidden />
+        <span className="font-mono text-2xl font-bold text-foreground tabular-nums">
           {avg != null ? avg.toFixed(2) : '—'}
         </span>
       </span>
@@ -192,12 +188,12 @@ export default function ReviewsView({ rows }: { rows: Row[] }) {
               </TableHeader>
               <TableBody>
                 {visible.map((row) => (
-                  <TableRow key={row.sku} className="align-top">
-                    <TableCell className="py-3 font-medium whitespace-normal text-foreground">
+                  <TableRow key={row.sku}>
+                    <TableCell className="py-1.5 text-sm font-medium whitespace-normal text-foreground">
                       {row.name}
                     </TableCell>
                     {RATED.map((m) => (
-                      <TableCell key={m} className="py-3">
+                      <TableCell key={m} className="py-1.5">
                         {row.cells[m].url ? (
                           <RatingCell r={byKey.get(`${row.sku}:${m}`)} />
                         ) : (

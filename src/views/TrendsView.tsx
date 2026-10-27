@@ -1,10 +1,18 @@
-import { ArrowDown, ArrowUp, TriangleAlert } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, TriangleAlert } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import { FilterBox, SchemaNote, Where } from '@/components/listing';
 import { PriceChart, type Series } from '@/components/PriceChart';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Table,
   TableBody,
@@ -218,11 +226,9 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
   // lines reads as broken rather than as "nothing happened".
   const [days, setDays] = useState<Range>(30);
   const [filter, setFilter] = useState('');
-  const chartRef = useRef<HTMLDivElement>(null);
 
-  // Until someone picks, show the first product that is actually selling somewhere.
-  const selected =
-    ordered.find((r) => r.sku === sku) ?? ordered.find((r) => r.liveCount > 0) ?? ordered[0];
+  // The product whose chart is open in the modal, if any.
+  const selected = ordered.find((r) => r.sku === sku) ?? null;
 
   // The sheet's SP columns are optional; with none filled in, target lines are noise.
   const hasTargets = ordered.some((r) => MARKETPLACES.some((m) => r.cells[m].targetSp));
@@ -253,6 +259,10 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
   }, [selected, history, days]);
 
   const visible = useMemo(() => byName(ordered, filter), [ordered, filter]);
+  // The arrows (or ← →) step through the table's rows without closing the modal.
+  const at = selected ? visible.indexOf(selected) : -1;
+  const prev = at > 0 ? visible[at - 1] : null;
+  const next = at >= 0 && at < visible.length - 1 ? visible[at + 1] : null;
 
   if (!CONFIGURED) {
     return (
@@ -265,65 +275,17 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
     );
   }
 
-  function pick(next: string) {
-    setSku(next);
-    chartRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
-
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <Card ref={chartRef} className="card-glass min-w-0 scroll-mt-2">
-        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle className="flex min-w-0 items-center gap-2">
-            <label htmlFor="trend-product" className="sr-only">
-              Product
-            </label>
-            <select
-              id="trend-product"
-              value={selected?.sku ?? ''}
-              onChange={(e) => setSku(e.target.value)}
-              className="max-w-[80vw] rounded-md border border-border bg-card px-3 py-1.5 text-base font-semibold text-foreground"
-            >
-              {ordered.map((r) => (
-                <option key={r.sku} value={r.sku}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </CardTitle>
-          <div className="flex gap-1" role="group" aria-label="Time range">
-            {RANGES.map((r) => (
-              <Button
-                key={r}
-                size="sm"
-                variant={r === days ? 'secondary' : 'ghost'}
-                aria-pressed={r === days}
-                onClick={() => setDays(r)}
-              >
-                {r} days
-              </Button>
-            ))}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {history?.error ? (
-            <p className="py-16 text-center text-sm text-destructive">
-              Could not load history — {history.error.slice(0, 120)}
-            </p>
-          ) : !chart ? (
-            <div className="h-[360px] animate-pulse rounded-md bg-muted/30" />
-          ) : (
-            <PriceChart series={chart.series} from={chart.from} to={chart.to} />
-          )}
-        </CardContent>
-      </Card>
-
       <Card className="card-glass min-w-0">
         <CardHeader className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <CardTitle className="text-sm tracking-widest text-muted-foreground uppercase">
               All products · last 30 days
             </CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Click a product to open its price chart.
+            </p>
             {stats?.error &&
               (isMissingView(stats.error) ? (
                 <SchemaNote view="price_stats" />
@@ -368,7 +330,7 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
                       'cursor-pointer align-top',
                       isSelected && 'bg-muted/50 hover:bg-muted/50',
                     )}
-                    onClick={() => pick(row.sku)}
+                    onClick={() => setSku(row.sku)}
                     aria-selected={isSelected}
                   >
                     <TableCell className="py-3 whitespace-normal">
@@ -413,6 +375,95 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
           </Table>
         </CardContent>
       </Card>
+      <Dialog open={selected != null} onOpenChange={(open) => !open && setSku(null)}>
+        <DialogContent
+          className="max-w-6xl"
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowLeft' && prev) setSku(prev.sku);
+            if (e.key === 'ArrowRight' && next) setSku(next.sku);
+          }}
+        >
+          {selected && (
+            <>
+              <DialogHeader className="flex-row flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <DialogTitle className="text-lg">{selected.name}</DialogTitle>
+                  <DialogDescription>
+                    {selected.sku} · price on each marketplace over the last {days} days
+                  </DialogDescription>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex gap-1" role="group" aria-label="Time range">
+                    {RANGES.map((r) => (
+                      <Button
+                        key={r}
+                        size="sm"
+                        variant={r === days ? 'secondary' : 'ghost'}
+                        aria-pressed={r === days}
+                        onClick={() => setDays(r)}
+                      >
+                        {r} days
+                      </Button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      disabled={!prev}
+                      onClick={() => prev && setSku(prev.sku)}
+                      aria-label="Previous product"
+                    >
+                      <ChevronLeft />
+                    </Button>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {at + 1} / {visible.length}
+                    </span>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      disabled={!next}
+                      onClick={() => next && setSku(next.sku)}
+                      aria-label="Next product"
+                    >
+                      <ChevronRight />
+                    </Button>
+                  </div>
+                </div>
+              </DialogHeader>
+              <DialogBody className="flex flex-col gap-4">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {MARKETPLACES.map((m) => (
+                    <div
+                      key={m}
+                      className="flex flex-col gap-1 rounded-lg border border-border px-3 py-2.5"
+                    >
+                      <Where
+                        marketplace={m}
+                        className="inline-flex items-center gap-1.5 text-sm font-medium"
+                      />
+                      <ListingCell
+                        cell={selected.cells[m]}
+                        stats={stats?.data?.get(`${selected.sku}:${m}`)}
+                        showTarget={hasTargets}
+                      />
+                    </div>
+                  ))}
+                </div>
+                {history?.error ? (
+                  <p className="py-16 text-center text-sm text-destructive">
+                    Could not load history — {history.error.slice(0, 120)}
+                  </p>
+                ) : !chart ? (
+                  <div className="h-[360px] animate-pulse rounded-md bg-muted/30" />
+                ) : (
+                  <PriceChart series={chart.series} from={chart.from} to={chart.to} />
+                )}
+              </DialogBody>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
