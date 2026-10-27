@@ -194,7 +194,7 @@ export function App() {
               {tab === 'prices' && <PricesView rows={data.rows} showUnlisted={showUnlisted} />}
               {tab === 'trends' && <TrendsView rows={data.rows} />}
               {tab === 'availability' && <AvailabilityView rows={data.rows} />}
-              {tab === 'reviews' && <ReviewsView rows={data.rows} />}
+              {tab === 'reviews' && <ReviewsView rows={data.rows} competitors={data.competitors} />}
               {tab === 'competitors' && (
                 <CompetitorsView rows={data.rows} competitors={data.competitors} />
               )}

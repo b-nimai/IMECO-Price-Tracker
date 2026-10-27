@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, Star } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { BarList } from '@/components/charts/BarList';
 import { FilterBox, SchemaNote, Where } from '@/components/listing';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,7 +17,7 @@ import { formatAmount } from '@/data/format';
 import { CONFIGURED, fetchRatings, type RatingRow } from '@/data/supabaseClient';
 import { MARKETPLACE_LABELS, sheetOrder, type Marketplace, type Row } from '@/data/types';
 import { isMissingView, useRemote } from '@/hooks/useRemote';
-import { byName } from '@/lib/utils';
+import { byName, cn } from '@/lib/utils';
 
 // Blinkit shows no ratings, so this tab has two columns, not three.
 const RATED: Marketplace[] = ['amazon', 'flipkart'];
@@ -71,7 +72,7 @@ function Scorecard({ marketplace, rows }: { marketplace: Marketplace; rows: Rati
   const total = mine.reduce((n, r) => n + (r.rating_count ?? 0), 0);
   const low = mine.filter((r) => r.rating < 4).length;
   return (
-    <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-lg border border-border bg-card/60 px-4 py-2">
+    <div className="flex min-w-48 flex-1 flex-col gap-1 card-glass rounded-xl px-4 py-3">
       <span className="eyebrow">{MARKETPLACE_LABELS[marketplace]}</span>
       <span className="inline-flex items-center gap-2">
         <Star className="size-5 fill-amber-400 text-amber-400" aria-hidden />
@@ -87,7 +88,154 @@ function Scorecard({ marketplace, rows }: { marketplace: Marketplace; rows: Rati
   );
 }
 
-export default function ReviewsView({ rows }: { rows: Row[] }) {
+/** Average of a product's ratings across Amazon and Flipkart, weighted by how many ratings each has. */
+function avgRating(
+  sku: string,
+  byKey: Map<string, RatingRow>,
+): { rating: number; count: number } | null {
+  let sum = 0;
+  let weight = 0;
+  let count = 0;
+  for (const m of RATED) {
+    const r = byKey.get(`${sku}:${m}`);
+    if (!r) continue;
+    const w = Math.max(1, r.rating_count ?? 1);
+    sum += r.rating * w;
+    weight += w;
+    count += r.rating_count ?? 0;
+  }
+  return weight ? { rating: sum / weight, count } : null;
+}
+
+const LO = 3.5;
+const HI = 5;
+const at = (v: number) => `${((Math.min(HI, Math.max(LO, v)) - LO) / (HI - LO)) * 100}%`;
+
+/** Each IMECO product's rating against its best-rated rival, on one 3.5–5★ scale. */
+function RatingDuel({
+  rows,
+  competitors,
+  byKey,
+}: {
+  rows: Row[];
+  competitors: Row[];
+  byKey: Map<string, RatingRow>;
+}) {
+  const lines = rows
+    .map((row) => {
+      const ours = avgRating(row.sku, byKey);
+      const rivals = competitors
+        .filter((c) => c.competitorOf === row.sku)
+        .map((c) => ({ c, r: avgRating(c.sku, byKey) }))
+        .filter((x): x is { c: Row; r: { rating: number; count: number } } => x.r != null)
+        .sort((a, b) => b.r.rating - a.r.rating);
+      return { row, ours, best: rivals[0] ?? null };
+    })
+    .filter((l) => l.ours && l.best)
+    .sort((a, b) => a.ours!.rating - a.best!.r.rating - (b.ours!.rating - b.best!.r.rating));
+  if (!lines.length) return null;
+  const ahead = lines.filter((l) => l.ours!.rating >= l.best!.r.rating).length;
+  return (
+    <section className="card-glass flex min-w-0 flex-col gap-3 rounded-xl p-4">
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <span className="eyebrow">IMECO vs best-rated rival</span>
+        <span className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <span className="size-2.5 rounded-full bg-primary" /> IMECO
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="size-2.5 rounded-full border-2 border-warn" /> best rival
+          </span>
+          <span>
+            IMECO rated higher on <span className="font-semibold text-foreground">{ahead}</span> of{' '}
+            {lines.length}
+          </span>
+        </span>
+      </header>
+      <div className="flex flex-col gap-1">
+        <div className="ml-[40%] flex justify-between text-[10px] text-muted-foreground">
+          {[3.5, 4, 4.5, 5].map((v) => (
+            <span key={v}>{v.toFixed(1)}★</span>
+          ))}
+        </div>
+        {lines.map(({ row, ours, best }) => {
+          const behind = ours!.rating < best!.r.rating;
+          const [lo, hi] = [ours!.rating, best!.r.rating].sort((a, b) => a - b);
+          return (
+            <div key={row.sku} className="grid grid-cols-[40%_1fr] items-center gap-2 text-xs">
+              <span className="truncate text-foreground" title={row.name}>
+                {row.name}
+              </span>
+              <div
+                className="relative h-5"
+                title={`IMECO ${ours!.rating.toFixed(2)}★ · ${best!.c.brand} ${best!.r.rating.toFixed(2)}★`}
+              >
+                <span className="absolute inset-x-0 top-1/2 h-px bg-border" />
+                <span
+                  className={cn(
+                    'absolute top-1/2 h-1 -translate-y-1/2 rounded-full',
+                    behind ? 'bg-warn/40' : 'bg-primary/30',
+                  )}
+                  style={{ left: at(lo), width: `calc(${at(hi)} - ${at(lo)})` }}
+                />
+                <span
+                  className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-warn bg-card"
+                  style={{ left: at(best!.r.rating) }}
+                />
+                <span
+                  className="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary ring-2 ring-card"
+                  style={{ left: at(ours!.rating) }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+/** Where the new ratings came from in the last 30 days. */
+function Gained({ rows, byKey }: { rows: Row[]; byKey: Map<string, RatingRow> }) {
+  const items = rows
+    .map((row) => ({
+      row,
+      n: RATED.reduce((n, m) => {
+        const r = byKey.get(`${row.sku}:${m}`);
+        return (
+          n +
+          (r?.rating_count != null && r.count_then != null
+            ? Math.max(0, r.rating_count - r.count_then)
+            : 0)
+        );
+      }, 0),
+    }))
+    .filter((x) => x.n > 0)
+    .sort((a, b) => b.n - a.n)
+    .slice(0, 8);
+  return (
+    <section className="card-glass flex min-w-0 flex-col gap-3 rounded-xl p-4">
+      <span className="eyebrow">Most new ratings · 30 days</span>
+      {items.length ? (
+        <BarList
+          items={items.map(({ row, n }) => ({
+            key: row.sku,
+            label: <span title={row.name}>{row.name}</span>,
+            value: n,
+            display: `+${formatAmount(n)}`,
+            color: '#f59e0b',
+          }))}
+        />
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          No new ratings yet — this fills in as the 30-day history builds.
+        </p>
+      )}
+    </section>
+  );
+}
+
+export default function ReviewsView({ rows, competitors }: { rows: Row[]; competitors: Row[] }) {
   const ordered = useMemo(() => sheetOrder(rows), [rows]);
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<Sort>('sheet');
@@ -126,11 +274,18 @@ export default function ReviewsView({ rows }: { rows: Row[] }) {
   const empty = ratings?.data && ratings.data.length === 0;
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="grid gap-3 md:grid-cols-2">
         {RATED.map((m) => (
           <Scorecard key={m} marketplace={m} rows={ratings?.data ?? []} />
         ))}
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-3">
+        <div className="min-w-0 xl:col-span-2">
+          <RatingDuel rows={ordered} competitors={competitors} byKey={byKey} />
+        </div>
+        <Gained rows={ordered} byKey={byKey} />
       </div>
 
       <Card className="card-glass min-w-0">
