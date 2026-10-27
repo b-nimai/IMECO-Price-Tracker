@@ -1,6 +1,8 @@
 import { Check, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { Ring } from '@/components/charts/Ring';
+import { StackedBar } from '@/components/charts/StackedBar';
 import { FilterBox, SchemaNote, Where } from '@/components/listing';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,7 +22,13 @@ import {
   type AvailabilityRow,
   type StoreRow,
 } from '@/data/supabaseClient';
-import { MARKETPLACE_LABELS, MARKETPLACES, sheetOrder, type Row } from '@/data/types';
+import {
+  MARKETPLACE_COLORS,
+  MARKETPLACES,
+  sheetOrder,
+  type Marketplace,
+  type Row,
+} from '@/data/types';
 import { isMissingView, useRemote } from '@/hooks/useRemote';
 import { byName, cn } from '@/lib/utils';
 
@@ -73,19 +81,34 @@ function AvailabilityCell({ row, stats }: { row: Row; stats: AvailabilityRow | u
 }
 
 /** In stock share across every listing on one marketplace, last 7 days. */
-function Scorecard({ label, rows }: { label: string; rows: AvailabilityRow[] }) {
+function Scorecard({ marketplace, rows }: { marketplace: Marketplace; rows: AvailabilityRow[] }) {
   const checks = rows.reduce((n, r) => n + r.checks_7d, 0);
   const inStock = rows.reduce((n, r) => n + r.in_stock_7d, 0);
   const now = rows.filter((r) => r.status_now === 'ok').length;
+  const out = rows.length - now;
   return (
-    <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-lg border border-border bg-card/60 px-4 py-3">
-      <span className="eyebrow">{label}</span>
-      <span className="font-mono text-3xl font-bold text-foreground tabular-nums">
-        {checks ? formatPct(inStock / checks) : '—'}
-      </span>
-      <span className="text-xs text-muted-foreground">
-        of checks in stock, last 7 days · {now} of {rows.length} listings in stock now
-      </span>
+    <div className="card-glass flex min-w-0 flex-col gap-3 rounded-xl px-4 py-3">
+      <div className="flex items-center gap-3">
+        <Ring
+          value={checks ? inStock / checks : null}
+          color={MARKETPLACE_COLORS[marketplace]}
+          size={60}
+        />
+        <div className="flex min-w-0 flex-col">
+          <Where
+            marketplace={marketplace}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold"
+          />
+          <span className="text-xs text-muted-foreground">of checks in stock, last 7 days</span>
+        </div>
+      </div>
+      <StackedBar
+        height={8}
+        segments={[
+          { label: 'In stock now', value: now, color: MARKETPLACE_COLORS[marketplace] },
+          { label: 'Out of stock', value: out, color: 'var(--bad)' },
+        ]}
+      />
     </div>
   );
 }
@@ -232,12 +255,12 @@ export default function AvailabilityView({ rows }: { rows: Row[] }) {
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="grid gap-3 md:grid-cols-3">
         {MARKETPLACES.map((m) => (
           <Scorecard
             key={m}
-            label={MARKETPLACE_LABELS[m]}
+            marketplace={m}
             rows={(availability?.data ?? []).filter((r) => r.marketplace === m)}
           />
         ))}
