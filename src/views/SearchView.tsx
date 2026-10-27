@@ -1,19 +1,13 @@
 import { ArrowDown, ArrowUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import { FilterBox, SchemaNote, Where } from '@/components/listing';
+import { Ring } from '@/components/charts/Ring';
+import { StackedBar } from '@/components/charts/StackedBar';
+import { FilterBox, Segmented, SchemaNote, Where } from '@/components/listing';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Modal } from '@/components/Modal';
 import { listNav, useSticky } from '@/hooks/useModal';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { formatPrice } from '@/data/format';
 import {
   CONFIGURED,
@@ -22,7 +16,8 @@ import {
   type SearchDayRow,
   type SearchResultRow,
 } from '@/data/supabaseClient';
-import { MARKETPLACES, type Marketplace } from '@/data/types';
+import { shareOfSearch } from '@/data/overview';
+import { MARKETPLACE_COLORS, MARKETPLACES, type Marketplace } from '@/data/types';
 import { isMissingView, useRemote } from '@/hooks/useRemote';
 import { cn } from '@/lib/utils';
 
@@ -89,28 +84,142 @@ function RankCell({
   );
 }
 
-function Scorecard({
+/** A rank's colour band: the darker the green, the nearer the top. */
+function band(rank: number | null): { bg: string; fg: string } {
+  if (rank == null) return { bg: 'transparent', fg: 'text-muted-foreground/60' };
+  if (rank <= 3)
+    return { bg: 'color-mix(in srgb, var(--primary) 55%, transparent)', fg: 'text-foreground' };
+  if (rank <= 10)
+    return { bg: 'color-mix(in srgb, var(--primary) 28%, transparent)', fg: 'text-foreground' };
+  if (rank <= 20)
+    return { bg: 'color-mix(in srgb, var(--warn) 22%, transparent)', fg: 'text-foreground' };
+  return { bg: 'var(--muted)', fg: 'text-muted-foreground' };
+}
+
+const BANDS: [string, number | null][] = [
+  ['Top 3', 1],
+  ['4–10', 5],
+  ['11–20', 15],
+  ['Lower', 30],
+  ['Not found', null],
+];
+
+/** One keyword on one marketplace as a coloured tile: rank, movement, and IMECO's ads. */
+function HeatCell({
+  today,
+  before,
+}: {
+  today: SearchDayRow | undefined;
+  before: SearchDayRow | undefined;
+}) {
+  if (!today) {
+    return (
+      <div className="flex h-9 items-center justify-center rounded-md border border-dashed border-border text-[10px] text-muted-foreground/50">
+        not searched
+      </div>
+    );
+  }
+  const now = rankOf(today);
+  const then = rankOf(before);
+  const moved = now && then && !now.ad && !then.ad ? then.rank - now.rank : 0;
+  const tone = band(now?.rank ?? null);
+  return (
+    <div
+      className={cn(
+        'flex h-9 items-center justify-between gap-1 rounded-md px-2 text-xs tabular-nums',
+        tone.fg,
+        !now && 'border border-dashed border-border',
+      )}
+      style={{ background: tone.bg }}
+      title={
+        now
+          ? `#${now.rank}${now.ad ? ' (ad)' : ''} · ${today.imeco_top10} IMECO in top 10${
+              today.imeco_ads ? ` · ${today.imeco_ads} ads` : ''
+            }`
+          : `Not in the top ${today.results}`
+      }
+    >
+      <span className="font-semibold">
+        {now ? `#${now.rank}` : '—'}
+        {now?.ad && <span className="ml-0.5 text-[9px] font-normal opacity-80">ad</span>}
+      </span>
+      <span className="flex items-center gap-1">
+        {moved > 0 && (
+          <span className="inline-flex items-center text-[10px] font-semibold text-good">
+            <ArrowUp className="size-3" aria-hidden />
+            {moved}
+          </span>
+        )}
+        {moved < 0 && (
+          <span className="inline-flex items-center text-[10px] font-semibold text-bad">
+            <ArrowDown className="size-3" aria-hidden />
+            {-moved}
+          </span>
+        )}
+        {today.imeco_ads > 0 && (
+          <span className="rounded bg-amber-500/20 px-1 text-[9px] font-semibold text-warn">
+            {today.imeco_ads} AD
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** Per marketplace: how many keywords IMECO is on page one for, and who owns the top 20. */
+function MarketCard({
   marketplace,
   latest,
+  results,
 }: {
   marketplace: Marketplace;
   latest: Map<string, SearchDayRow>;
+  results: SearchResultRow[];
 }) {
   const mine = [...latest.values()].filter((d) => d.marketplace === marketplace);
   const pageOne = mine.filter((d) => (rankOf(d)?.rank ?? Infinity) <= 10).length;
   const advertised = mine.filter((d) => d.imeco_ads > 0).length;
+  const shares = shareOfSearch(results, marketplace);
   return (
-    <div className="flex min-w-48 flex-1 flex-col gap-1 rounded-lg border border-border bg-card/60 px-4 py-2">
-      <span className="eyebrow">
-        <Where marketplace={marketplace} className="inline-flex items-center gap-1.5" />
-      </span>
-      <span className="font-mono text-2xl font-bold text-foreground tabular-nums">
-        {mine.length ? `${pageOne} / ${mine.length}` : '—'}
-      </span>
-      <span className="text-xs text-muted-foreground">
-        keywords where IMECO is in the top 10
-        {advertised > 0 && ` · advertising on ${advertised}`}
-      </span>
+    <div className="card-glass flex min-w-0 flex-1 flex-col gap-3 rounded-xl px-4 py-3">
+      <div className="flex items-center gap-3">
+        <Ring
+          value={mine.length ? pageOne / mine.length : null}
+          color={MARKETPLACE_COLORS[marketplace]}
+          size={56}
+        />
+        <div className="flex min-w-0 flex-col">
+          <Where
+            marketplace={marketplace}
+            className="inline-flex items-center gap-1.5 text-sm font-semibold"
+          />
+          <span className="text-xs text-muted-foreground">
+            top 10 on <span className="font-semibold text-foreground">{pageOne}</span> of{' '}
+            {mine.length} keywords
+            {advertised > 0 && ` · ads on ${advertised}`}
+          </span>
+        </div>
+      </div>
+      {shares.some((x) => x.slots) && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[11px] text-muted-foreground">
+            Share of the top 20, all keywords
+          </span>
+          <StackedBar
+            height={10}
+            segments={shares.map((x, i) => ({
+              label: x.brand,
+              value: x.slots,
+              color:
+                x.brand === 'IMECO'
+                  ? 'var(--primary)'
+                  : x.brand === 'Other'
+                    ? 'color-mix(in srgb, var(--muted-foreground) 35%, transparent)'
+                    : ['var(--chart-4)', 'var(--chart-5)', 'var(--chart-1)'][i - 1],
+            }))}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -260,6 +369,7 @@ function EmptyState({ missing }: { missing: boolean }) {
 export default function SearchView() {
   const [filter, setFilter] = useState('');
   const [picked, setPicked] = useState<string | null>(null);
+  const [sort, setSort] = useState<'az' | 'best' | 'worst'>('az');
   const days = useRemote(fetchSearchDays, DAYS);
   const latest = useRemote(fetchSearchLatest);
 
@@ -291,6 +401,14 @@ export default function SearchView() {
     return q ? keywords.filter((k) => k.toLowerCase().includes(q)) : keywords;
   }, [keywords, filter]);
 
+  // Best rank across the marketplaces; a keyword IMECO is not on anywhere sorts as 999.
+  const sorted = useMemo(() => {
+    if (sort === 'az') return visible;
+    const best = (k: string) =>
+      Math.min(999, ...MARKETPLACES.map((m) => rankOf(today.get(`${k}:${m}`))?.rank ?? 999));
+    return [...visible].sort((a, b) => (sort === 'best' ? 1 : -1) * (best(a) - best(b)));
+  }, [visible, sort, today]);
+
   const detail = useMemo(() => {
     const out = new Map<Marketplace, SearchResultRow[]>();
     for (const r of latest?.data ?? []) {
@@ -314,70 +432,107 @@ export default function SearchView() {
   if (!days) return <div className="h-96 animate-pulse rounded-xl bg-muted/30" />;
 
   return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex flex-wrap gap-2">
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="grid gap-3 md:grid-cols-3">
         {MARKETPLACES.map((m) => (
-          <Scorecard key={m} marketplace={m} latest={today} />
+          <MarketCard key={m} marketplace={m} latest={today} results={latest?.data ?? []} />
         ))}
       </div>
 
-      <Card className="card-glass min-w-0">
-        <CardHeader className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <CardTitle className="text-sm tracking-widest text-muted-foreground uppercase">
-              IMECO’s rank by keyword
-            </CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Best organic position (an ad slot only when there is no organic one), searched{' '}
-              {lastDay ? dateLabel.format(Date.parse(lastDay)) : '—'}; arrows compare with the
-              search before. Click a keyword to open its whole results page.
-            </p>
-          </div>
-          <FilterBox value={filter} onChange={setFilter} placeholder="Filter keywords" />
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[28%]">Keyword</TableHead>
-                {MARKETPLACES.map((m) => (
-                  <TableHead key={m}>
-                    <Where marketplace={m} className="inline-flex items-center gap-1.5" />
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((k) => (
-                <TableRow
-                  key={k}
-                  className={cn(
-                    'cursor-pointer',
-                    k === selected && 'bg-muted/50 hover:bg-muted/50',
-                  )}
-                  onClick={() => setPicked(k)}
-                  aria-selected={k === selected}
-                >
-                  <TableCell className="py-1.5 text-sm font-medium text-foreground">
-                    <span className={cn(k === selected && 'border-l-2 border-primary pl-2')}>
-                      {k}
-                    </span>
-                  </TableCell>
-                  {MARKETPLACES.map((m) => (
-                    <TableCell key={m} className="py-1.5">
-                      <RankCell today={today.get(`${k}:${m}`)} before={before.get(`${k}:${m}`)} />
-                    </TableCell>
-                  ))}
-                </TableRow>
+      <section className="card-glass min-w-0 rounded-xl">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs text-muted-foreground">
+              IMECO’s best position per keyword, searched{' '}
+              {lastDay ? dateLabel.format(Date.parse(lastDay)) : '—'} · arrows vs the search before
+              · click a keyword for its full results
+            </span>
+            <span className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+              {BANDS.map(([label, rank]) => (
+                <span key={label} className="inline-flex items-center gap-1">
+                  <span
+                    className={cn(
+                      'size-3 rounded-sm',
+                      rank == null && 'border border-dashed border-border',
+                    )}
+                    style={{ background: band(rank).bg }}
+                  />
+                  {label}
+                </span>
               ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Segmented
+              label="Sort"
+              value={sort}
+              onChange={setSort}
+              options={[
+                ['az', 'A–Z'],
+                ['best', 'Best rank'],
+                ['worst', 'Needs work'],
+              ]}
+            />
+            <FilterBox value={filter} onChange={setFilter} placeholder="Filter keywords" />
+          </div>
+        </header>
+        <div className="px-4 py-3">
+          {/* Two columns on a wide screen, each read top to bottom. */}
+          <div className="grid gap-x-6 pb-1.5 xl:grid-cols-2">
+            {[0, 1].map((col) => (
+              <div
+                key={col}
+                className={cn(
+                  'grid grid-cols-[minmax(8rem,1.4fr)_repeat(3,minmax(0,1fr))] items-center gap-1.5 text-[11px] text-muted-foreground',
+                  col === 1 && 'hidden xl:grid',
+                )}
+              >
+                <span className="pl-1">Keyword</span>
+                {MARKETPLACES.map((m) => (
+                  <Where
+                    key={m}
+                    marketplace={m}
+                    className="inline-flex items-center gap-1 text-[11px]"
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="gap-x-6 xl:columns-2">
+            {sorted.map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setPicked(k)}
+                className={cn(
+                  'mb-1 grid w-full break-inside-avoid grid-cols-[minmax(8rem,1.4fr)_repeat(3,minmax(0,1fr))] items-center gap-1.5 rounded-lg py-0.5 text-left transition-colors hover:bg-muted/40',
+                  k === selected && 'bg-muted/50',
+                )}
+              >
+                <span className="truncate pl-1 text-sm font-medium text-foreground" title={k}>
+                  {k}
+                </span>
+                {MARKETPLACES.map((m) => (
+                  <HeatCell
+                    key={m}
+                    today={today.get(`${k}:${m}`)}
+                    before={before.get(`${k}:${m}`)}
+                  />
+                ))}
+              </button>
+            ))}
+          </div>
+          {!sorted.length && (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No keyword matches “{filter}”.
+            </p>
+          )}
+        </div>
+      </section>
 
       <ResultsDialog
         keyword={selected}
-        keywords={visible}
+        keywords={sorted}
         detail={detail}
         today={today}
         before={before}
