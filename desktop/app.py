@@ -195,10 +195,15 @@ class App:
 
             with Fetcher(settings) as fetcher:
                 results = scrape(products, fetcher, progress, checks)
-                # The daily keyword search, if today's has not happened yet. No progress bar of
-                # its own: it is ~1-2 minutes after the prices, and failures only skip keywords.
-                searches = run_search(products, fetcher)[0] if search_wanted(settings) else None
+                # The daily keyword search, if today's has not happened yet. It reuses the
+                # three bars: with ~70 keywords it is several minutes, and full bars over a
+                # "Running..." button would look like a hang.
+                searches = None
+                if search_wanted(settings):
+                    self.events.put(("phase", "Searching keywords (once a day)..."))
+                    searches = run_search(products, fetcher, progress)[0]
 
+            self.events.put(("phase", "Saving to the dashboard..."))
             store_results(settings, products, results, checks, source, searches)
 
             ok = sum(c.status is Status.OK for _, c in results)
@@ -259,6 +264,12 @@ class App:
                     bar["maximum"] = max(total, 1)
                     bar["value"] = done
                     self.labels[marketplace].config(text=f"{done}/{total}", fg=FG)
+                elif event[0] == "phase":
+                    self.subtitle.config(text=event[1], fg=MUTED)
+                    if event[1].startswith("Searching"):
+                        for marketplace in MARKETPLACES:
+                            self.bars[marketplace]["value"] = 0
+                            self.labels[marketplace].config(text="-", fg=MUTED)
                 elif event[0] == "done":
                     _, ok, total = event
                     self.subtitle.config(

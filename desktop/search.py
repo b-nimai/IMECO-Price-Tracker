@@ -23,6 +23,7 @@ import html as htmllib
 import json
 import re
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
@@ -322,8 +323,11 @@ def search(
     keywords: list[tuple[str, tuple[str, ...]]],
     fetcher: Fetcher,
     products: list[Product],
+    on_progress: Callable[[str, int, int], None] | None = None,
 ) -> tuple[list[SearchResult], list[str]]:
     """Run every keyword on its marketplaces. Returns (results, problems).
+
+    `on_progress(marketplace, done, total)` after each keyword, like the price scrape's.
 
     One thread per marketplace, keywords in sequence behind the same per-host throttle the
     price scrape uses. A keyword that fails is reported and skipped — it never fails the run.
@@ -332,9 +336,10 @@ def search(
     def one_marketplace(marketplace: str) -> tuple[list[SearchResult], list[str]]:
         found: list[SearchResult] = []
         problems: list[str] = []
-        for keyword, where in keywords:
-            if marketplace not in where:
-                continue
+        mine = [k for k, where in keywords if marketplace in where]
+        for i, keyword in enumerate(mine, start=1):
+            if on_progress and i > 1:
+                on_progress(marketplace, i - 1, len(mine))
             url, body = search_request(marketplace, keyword)
             result = fetcher.fetch_html(marketplace, url, json_body=body)
             if not result.ok or result.html is None:
@@ -350,6 +355,8 @@ def search(
             for r in page:
                 r.keyword = keyword
             found.extend(page)
+        if on_progress and mine:
+            on_progress(marketplace, len(mine), len(mine))
         return found, problems
 
     results: list[SearchResult] = []

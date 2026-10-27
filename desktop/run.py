@@ -334,7 +334,9 @@ def search_wanted(settings: Settings, force: bool = False) -> bool:
         return False
 
 
-def run_search(products: list[Product], fetcher: Fetcher) -> tuple[list[SearchResult], list[str]]:
+def run_search(
+    products: list[Product], fetcher: Fetcher, on_progress: ProgressFn | None = None
+) -> tuple[list[SearchResult], list[str]]:
     """The daily keyword search, with the workbook's keywords (or the defaults).
 
     Never raises for a workbook problem: a Keywords sheet it cannot read falls back to the
@@ -346,7 +348,7 @@ def run_search(products: list[Product], fetcher: Fetcher) -> tuple[list[SearchRe
     except Exception as exc:
         problems.append(f"{exc} — searched the default keywords instead")
         keywords = [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
-    results, issues = search(keywords, fetcher, products)
+    results, issues = search(keywords, fetcher, products, on_progress)
     return results, problems + issues
 
 
