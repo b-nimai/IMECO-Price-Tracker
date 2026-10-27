@@ -177,6 +177,23 @@ create or replace view price_stats
   from priced
   group by sku, marketplace;
 
+-- One row per listing per day (India time) for the last 90 days: the day's closing live price,
+-- its low and high, and how many readings found it in stock. The Overview's sparklines and the
+-- Trends cards read this rather than ~2.5k raw snapshots a day.
+create or replace view price_daily
+  with (security_invoker = on) as
+  select sku, marketplace,
+         (checked_at at time zone 'Asia/Kolkata')::date                             as day,
+         (array_agg(price order by checked_at desc)
+            filter (where status = 'ok' and price is not null))[1]                  as close_price,
+         min(price) filter (where status = 'ok')                                     as low_price,
+         max(price) filter (where status = 'ok')                                     as high_price,
+         count(*)   filter (where status in ('ok', 'out_of_stock'))                  as readings,
+         count(*)   filter (where status = 'ok')                                     as in_stock
+  from price_snapshots
+  where checked_at >= now() - interval '90 days'
+  group by sku, marketplace, day;
+
 -- In-stock share per listing over the last 7 and 30 days, from the hourly readings, plus how
 -- long the CURRENT state has lasted. Only `ok` and `out_of_stock` readings count: a blocked or
 -- failed fetch says nothing about stock, and counting it either way would make a bad scrape
@@ -313,7 +330,7 @@ create policy "public read snapshots" on price_snapshots for select to anon, aut
 create policy "public read availability" on availability_checks for select to anon, authenticated using (true);
 create policy "public read search" on search_results for select to anon, authenticated using (true);
 
-grant select on products, runs, price_snapshots, latest_prices, price_stats,
+grant select on products, runs, price_snapshots, latest_prices, price_stats, price_daily,
                 availability_checks, availability_stats, blinkit_store_stats, rating_trend,
                 search_results, search_latest, search_rank_daily
   to anon, authenticated;

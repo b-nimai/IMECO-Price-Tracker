@@ -169,6 +169,28 @@ export async function fetchPriceStats(): Promise<PriceStatsRow[]> {
   );
 }
 
+export interface PriceDailyRow {
+  sku: string;
+  marketplace: string;
+  /** YYYY-MM-DD, India time. */
+  day: string;
+  close_price: number | null;
+  low_price: number | null;
+  high_price: number | null;
+  readings: number;
+  in_stock: number;
+}
+
+/** Per listing per day — the `price_daily` view. ~8k rows for 30 days of the whole catalogue. */
+export async function fetchPriceDaily(days: number): Promise<PriceDailyRow[]> {
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+  return getAll<PriceDailyRow>(
+    `price_daily?select=sku,marketplace,day,close_price,low_price,high_price,readings,in_stock` +
+      `&day=gte.${since}&order=day.asc,sku.asc,marketplace.asc`,
+    'price_daily',
+  );
+}
+
 // ── availability & ratings (their tabs) ─────────────────────────────────────────────────
 // Views in supabase/schema.sql, each one row per listing. Same on-demand rule as history.
 

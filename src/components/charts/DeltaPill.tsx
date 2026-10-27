@@ -20,7 +20,7 @@ export function DeltaPill({ delta, format = (v) => String(v), good = 'up', class
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-0.5 rounded-full px-1.5 py-px text-[11px] font-semibold tabular-nums',
+        'inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-px text-[11px] font-semibold whitespace-nowrap tabular-nums',
         tone === 'good' && 'bg-emerald-500/15 text-good',
         tone === 'bad' && 'bg-rose-500/15 text-bad',
         tone === 'neutral' && 'bg-muted text-muted-foreground',

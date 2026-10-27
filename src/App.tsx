@@ -1,4 +1,4 @@
-import { Boxes, ChartLine, IndianRupee, Search, Star, Swords } from 'lucide-react';
+import { Boxes, ChartLine, IndianRupee, LayoutDashboard, Search, Star, Swords } from 'lucide-react';
 import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 
 import { Sidebar, type NavItem } from '@/components/Sidebar';
@@ -10,16 +10,30 @@ import { useTheme } from '@/hooks/useTheme';
 import { HeatmapView } from '@/views/HeatmapView';
 
 // Every page but the board is code-split, so the first paint downloads only what it shows.
+const OverviewView = lazy(() => import('@/views/OverviewView'));
 const TrendsView = lazy(() => import('@/views/TrendsView'));
 const AvailabilityView = lazy(() => import('@/views/AvailabilityView'));
 const ReviewsView = lazy(() => import('@/views/ReviewsView'));
 const CompetitorsView = lazy(() => import('@/views/CompetitorsView'));
 const SearchView = lazy(() => import('@/views/SearchView'));
 
-const TABS = ['prices', 'trends', 'availability', 'reviews', 'competitors', 'search'] as const;
+const TABS = [
+  'overview',
+  'prices',
+  'trends',
+  'availability',
+  'reviews',
+  'competitors',
+  'search',
+] as const;
 type Tab = (typeof TABS)[number];
 
 const PAGES: Record<Tab, { label: string; icon: NavItem<Tab>['icon']; subtitle: string }> = {
+  overview: {
+    label: 'Overview',
+    icon: LayoutDashboard,
+    subtitle: 'Today across prices, stock, rivals, ratings and search — click anything to dig in',
+  },
   prices: {
     label: 'Prices',
     icon: IndianRupee,
@@ -91,7 +105,7 @@ function PageHeader({ tab, actions }: { tab: Tab; actions?: ReactNode }) {
 export function App() {
   const { data, syncing, error, demo, refresh } = usePriceData();
   const [showUnlisted, setShowUnlisted] = useState(true);
-  const [tab, setTab] = useHashTab(TABS, 'prices');
+  const [tab, setTab] = useHashTab(TABS, 'overview');
   const [theme, toggleTheme] = useTheme();
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
@@ -173,6 +187,14 @@ export function App() {
         ) : (
           <main key={tab} className="animate-fade-in-up min-w-0">
             <Suspense fallback={<Skeleton className="h-96 rounded-xl" />}>
+              {tab === 'overview' && (
+                <OverviewView
+                  rows={data.rows}
+                  competitors={data.competitors}
+                  totals={data.totals}
+                  onNavigate={setTab}
+                />
+              )}
               {tab === 'trends' && <TrendsView rows={data.rows} />}
               {tab === 'availability' && <AvailabilityView rows={data.rows} />}
               {tab === 'reviews' && <ReviewsView rows={data.rows} />}

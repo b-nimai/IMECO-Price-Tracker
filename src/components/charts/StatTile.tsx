@@ -70,7 +70,7 @@ export function StatTile({
         </span>
         {suffix && <span className="text-sm text-muted-foreground">{suffix}</span>}
       </div>
-      <div className="flex min-h-5 items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="flex min-h-5 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] whitespace-nowrap text-muted-foreground">
         {delta !== undefined && (
           <>
             <DeltaPill delta={delta} format={deltaFormat} good={deltaGood} />

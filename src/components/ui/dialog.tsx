@@ -39,7 +39,7 @@ function DialogContent({
         {children}
         {/* Close sits on the sheet's inner edge — top-left for a right-hand sheet. */}
         <DialogPrimitive.Close
-          className="absolute top-4 rounded-md group-data-[side=left]/dialog:right-3 group-data-[side=right]/dialog:left-3 p-1.5 text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="absolute top-3.5 flex size-9 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground shadow-sm transition-all duration-150 outline-none group-data-[side=left]/dialog:right-3.5 group-data-[side=right]/dialog:left-3.5 hover:scale-105 hover:border-foreground/20 hover:bg-foreground/10 hover:text-foreground active:scale-95 focus-visible:ring-3 focus-visible:ring-ring/50"
           aria-label="Close"
         >
           <XIcon className="size-4" />
@@ -53,7 +53,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-none flex-col gap-1 border-b border-border px-5 py-4 group-data-[side=left]/dialog:pr-12 group-data-[side=right]/dialog:pl-12", className)}
+      className={cn("flex flex-none flex-col gap-1 border-b border-border px-5 py-4 group-data-[side=left]/dialog:pr-16 group-data-[side=right]/dialog:pl-16", className)}
       {...props}
     />
   )
