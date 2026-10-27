@@ -76,7 +76,7 @@ export function Header({
   const age = freshness(checkedAt);
 
   return (
-    <header className="card-glass flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2.5">
+    <header className="card-glass flex flex-none flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2.5">
       <div className="flex items-center gap-3">
         <Button
           variant="ghost"
@@ -105,51 +105,48 @@ export function Header({
         </div>
       </div>
 
-      {/* Title, tabs and status share one line when it is wide enough for all three (~1760px).
-          Narrower, the TABS take the second row — not the status group, which would otherwise
-          wrap on Prices alone (it has the extra unlisted switch) and make the header jump. */}
-      {nav && (
-        <div className="order-last max-w-full basis-full overflow-x-auto min-[1760px]:order-none min-[1760px]:basis-auto">
-          {nav}
+      {nav && <div className="max-w-full overflow-x-auto">{nav}</div>}
+
+      {/* Two stacked pairs on the right: coverage over the unlisted switch, the clock over how
+          fresh the prices are. Stacking keeps the whole header to one row on a laptop. */}
+      <div className="ml-auto flex items-center gap-4">
+        <div className="flex flex-col items-start gap-1.5">
+          {totals && <Coverage totals={totals} />}
+          {unlistedCount > 0 && (
+            <label className="flex cursor-pointer items-center gap-2 text-[11px] tracking-wider whitespace-nowrap text-muted-foreground uppercase">
+              <Switch checked={showUnlisted} onCheckedChange={onShowUnlistedChange} />
+              Show {unlistedCount} unlisted
+            </label>
+          )}
         </div>
-      )}
 
-      <div className="ml-auto flex flex-wrap items-center gap-3">
-        {totals && <Coverage totals={totals} />}
-
-        {unlistedCount > 0 && (
-          <label className="flex cursor-pointer items-center gap-2 text-[11px] tracking-wider whitespace-nowrap text-muted-foreground uppercase">
-            <Switch checked={showUnlisted} onCheckedChange={onShowUnlistedChange} />
-            Show {unlistedCount} unlisted
-          </label>
-        )}
-
-        {error ? (
-          <Badge variant="destructive" className="gap-1 text-[10px]">
-            Cached — {error.slice(0, 48)}
-          </Badge>
-        ) : age !== 'fresh' && checkedAt ? (
-          // Amber past 2h, red past 6h — i.e. one missed hourly run, then several. Deliberately
-          // a Badge rather than the quiet grey sync line: a stale board that looks normal is
-          // worse than no board, because the numbers are still perfectly readable and wrong.
-          <Badge
-            variant={age === 'very-stale' ? 'destructive' : 'secondary'}
-            className={cn(
-              'gap-1 text-[10px] whitespace-nowrap',
-              age === 'stale' && 'bg-amber-500/15 text-amber-400',
-            )}
-            title="Prices refresh hourly from the desktop app — this is older than that"
-          >
-            Prices {formatAgo(checkedAt)} — run the desktop app
-          </Badge>
-        ) : (
-          <span className="hidden items-center gap-1.5 text-[11px] tracking-widest text-muted-foreground uppercase md:flex">
-            <RefreshCw className={syncing ? 'size-3 animate-spin' : 'size-3'} aria-hidden />
-            {syncing ? 'Syncing' : checkedAt ? `Priced ${formatAgo(checkedAt)}` : '—'}
-          </span>
-        )}
-
-        <LiveClock />
+        <div className="flex flex-col items-end gap-1.5">
+          <LiveClock />
+          {error ? (
+            <Badge variant="destructive" className="gap-1 text-[10px]">
+              Cached — {error.slice(0, 48)}
+            </Badge>
+          ) : age !== 'fresh' && checkedAt ? (
+            // Amber past 2h, red past 6h — i.e. one missed hourly run, then several. Deliberately
+            // a Badge rather than the quiet grey sync line: a stale board that looks normal is
+            // worse than no board, because the numbers are still perfectly readable and wrong.
+            <Badge
+              variant={age === 'very-stale' ? 'destructive' : 'secondary'}
+              className={cn(
+                'gap-1 text-[10px] whitespace-nowrap',
+                age === 'stale' && 'bg-amber-500/15 text-amber-400',
+              )}
+              title="Prices refresh hourly from the desktop app — this is older than that"
+            >
+              Priced {formatAgo(checkedAt)} — run app
+            </Badge>
+          ) : (
+            <span className="flex items-center gap-1.5 text-[11px] tracking-widest whitespace-nowrap text-muted-foreground uppercase">
+              <RefreshCw className={syncing ? 'size-3 animate-spin' : 'size-3'} aria-hidden />
+              {syncing ? 'Syncing' : checkedAt ? `Priced ${formatAgo(checkedAt)}` : '—'}
+            </span>
+          )}
+        </div>
       </div>
     </header>
   );
