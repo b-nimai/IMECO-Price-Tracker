@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 
-import { FilterBox, SchemaNote, Where } from '@/components/listing';
+import { Sparkline, type SparkSeries } from '@/components/charts/Sparkline';
+import { FilterBox, SchemaNote, Segmented, Where } from '@/components/listing';
 import { ListingCell, ProductTrendModal } from '@/components/ProductTrendModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -12,7 +13,12 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { formatPct, formatPrice } from '@/data/format';
-import { CONFIGURED, fetchPriceStats, type PriceStatsRow } from '@/data/supabaseClient';
+import {
+  CONFIGURED,
+  fetchPriceDaily,
+  fetchPriceStats,
+  type PriceStatsRow,
+} from '@/data/supabaseClient';
 import { isMissingView, useRemote } from '@/hooks/useRemote';
 import {
   MARKETPLACE_COLORS,
@@ -103,10 +109,82 @@ function AllTime({
   );
 }
 
+type TrendSort = 'sheet' | 'volatile' | 'drop';
+
+const dayLabel = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
+
+/** One product as a small chart card: its live prices on top, its 30 days underneath. */
+function TrendCard({
+  row,
+  series,
+  slots,
+  changes,
+  loading,
+  onOpen,
+}: {
+  row: Row;
+  series: SparkSeries[];
+  slots: string[];
+  changes: number;
+  loading: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-card/60 p-3 text-left transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-lg"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="line-clamp-2 text-sm font-medium text-foreground">{row.name}</span>
+        {changes > 0 && (
+          <span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] text-muted-foreground tabular-nums">
+            {changes} change{changes === 1 ? '' : 's'}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
+        {MARKETPLACES.filter((m) => row.cells[m].url).map((m) => {
+          const c = row.cells[m];
+          const price = c.status === 'ok' ? c.price : null;
+          return (
+            <span key={m} className="inline-flex items-center gap-1">
+              <span
+                className="size-1.5 rounded-full"
+                style={{ background: MARKETPLACE_COLORS[m] }}
+              />
+              <span
+                className={cn(
+                  'tabular-nums',
+                  price != null ? 'font-semibold text-foreground' : 'text-muted-foreground',
+                )}
+              >
+                {price != null ? formatPrice(price) : c.status === 'out_of_stock' ? 'OOS' : '—'}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+      {series.length ? (
+        <Sparkline series={series} slots={slots} format={formatPrice} height={56} />
+      ) : loading ? (
+        <div className="h-14 animate-pulse rounded-md bg-muted/40" />
+      ) : (
+        <div className="flex h-14 items-center justify-center text-[11px] text-muted-foreground/60">
+          No history yet
+        </div>
+      )}
+    </button>
+  );
+}
+
 export default function TrendsView({ rows }: { rows: Row[] }) {
   const ordered = useMemo(() => sheetOrder(rows), [rows]);
   const [sku, setSku] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
+  const [view, setView] = useState<'cards' | 'table'>('cards');
+  const [sort, setSort] = useState<TrendSort>('sheet');
+  const daily = useRemote(fetchPriceDaily, 30);
 
   // The product whose chart is open in the modal, if any.
   const selected = ordered.find((r) => r.sku === sku) ?? null;
@@ -126,7 +204,43 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
     [statsRemote],
   );
 
-  const visible = useMemo(() => byName(ordered, filter), [ordered, filter]);
+  // Per listing, its daily closes over 30 days — the cards' charts and the sort keys.
+  const history = useMemo(() => {
+    const days = [...new Set((daily?.data ?? []).map((d) => d.day))].sort();
+    const at = new Map(days.map((d, i) => [d, i]));
+    const series = new Map<string, (number | null)[]>();
+    for (const d of daily?.data ?? []) {
+      const key = `${d.sku}:${d.marketplace}`;
+      if (!series.has(key))
+        series.set(
+          key,
+          days.map(() => null),
+        );
+      series.get(key)![at.get(d.day)!] = d.close_price;
+    }
+    return { days: days.map((d) => dayLabel.format(Date.parse(d))), series };
+  }, [daily]);
+
+  const visible = useMemo(() => {
+    const list = byName(ordered, filter);
+    if (sort === 'sheet') return list;
+    const changes = (r: Row) =>
+      MARKETPLACES.reduce((n, m) => n + (stats?.data?.get(`${r.sku}:${m}`)?.changes_30d ?? 0), 0);
+    // The biggest fall from a listing's first close in the window to its latest.
+    const drop = (r: Row) =>
+      Math.min(
+        0,
+        ...MARKETPLACES.map((m) => {
+          const v = (history.series.get(`${r.sku}:${m}`) ?? []).filter(
+            (x): x is number => x != null,
+          );
+          return v.length > 1 ? v[v.length - 1] / v[0] - 1 : 0;
+        }),
+      );
+    return [...list].sort((a, b) =>
+      sort === 'volatile' ? changes(b) - changes(a) : drop(a) - drop(b),
+    );
+  }, [ordered, filter, sort, stats, history]);
 
   if (!CONFIGURED) {
     return (
@@ -148,7 +262,7 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
               All products · last 30 days
             </CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
-              Click a product to open its price chart.
+              Every product’s last 30 days on each marketplace — click one for the full chart.
             </p>
             {stats?.error &&
               (isMissingView(stats.error) ? (
@@ -157,86 +271,130 @@ export default function TrendsView({ rows }: { rows: Row[] }) {
                 <p className="mt-1 text-xs text-destructive">{stats.error.slice(0, 120)}</p>
               ))}
           </div>
-          <FilterBox value={filter} onChange={setFilter} />
+          <div className="flex flex-wrap items-center gap-3">
+            <Segmented
+              label="Sort"
+              value={sort}
+              onChange={setSort}
+              options={[
+                ['sheet', 'Sheet order'],
+                ['volatile', 'Most changes'],
+                ['drop', 'Biggest drop'],
+              ]}
+            />
+            <Segmented
+              label="View"
+              value={view}
+              onChange={setView}
+              options={[
+                ['cards', 'Cards'],
+                ['table', 'Table'],
+              ]}
+            />
+            <FilterBox value={filter} onChange={setFilter} />
+          </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[30%]">Product</TableHead>
-                {MARKETPLACES.map((m) => (
-                  <TableHead key={m}>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span
-                        className="inline-block size-2 rounded-full"
-                        style={{ background: MARKETPLACE_COLORS[m] }}
-                        aria-hidden
-                      />
-                      {MARKETPLACE_LABELS[m]}
-                    </span>
-                  </TableHead>
-                ))}
-                <TableHead title="Gap between the highest and lowest live price across marketplaces">
-                  Spread now
-                </TableHead>
-                <TableHead title="Lowest to highest price ever recorded, any marketplace">
-                  All-time range
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((row) => {
-                const isSelected = row.sku === selected?.sku;
-                return (
-                  <TableRow
-                    key={row.sku}
-                    className={cn(
-                      'cursor-pointer align-top',
-                      isSelected && 'bg-muted/50 hover:bg-muted/50',
-                    )}
-                    onClick={() => setSku(row.sku)}
-                    aria-selected={isSelected}
-                  >
-                    <TableCell className="py-3 whitespace-normal">
-                      <span
-                        className={cn(
-                          'font-medium text-foreground',
-                          isSelected && 'border-l-2 border-primary pl-2',
-                        )}
-                      >
-                        {row.name}
-                      </span>
-                    </TableCell>
-                    {MARKETPLACES.map((m) => (
-                      <TableCell key={m} className="py-3">
-                        <ListingCell
-                          cell={row.cells[m]}
-                          stats={stats?.data?.get(`${row.sku}:${m}`)}
-                          showTarget={hasTargets}
+          {view === 'cards' ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {visible.map((row) => (
+                <TrendCard
+                  key={row.sku}
+                  row={row}
+                  series={MARKETPLACES.map((m) => ({
+                    values: history.series.get(`${row.sku}:${m}`) ?? [],
+                    color: MARKETPLACE_COLORS[m],
+                    label: MARKETPLACE_LABELS[m],
+                  })).filter((x) => x.values.some((v) => v != null))}
+                  slots={history.days}
+                  changes={MARKETPLACES.reduce(
+                    (n, m) => n + (stats?.data?.get(`${row.sku}:${m}`)?.changes_30d ?? 0),
+                    0,
+                  )}
+                  loading={!daily}
+                  onOpen={() => setSku(row.sku)}
+                />
+              ))}
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-[30%]">Product</TableHead>
+                  {MARKETPLACES.map((m) => (
+                    <TableHead key={m}>
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className="inline-block size-2 rounded-full"
+                          style={{ background: MARKETPLACE_COLORS[m] }}
+                          aria-hidden
                         />
+                        {MARKETPLACE_LABELS[m]}
+                      </span>
+                    </TableHead>
+                  ))}
+                  <TableHead title="Gap between the highest and lowest live price across marketplaces">
+                    Spread now
+                  </TableHead>
+                  <TableHead title="Lowest to highest price ever recorded, any marketplace">
+                    All-time range
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visible.map((row) => {
+                  const isSelected = row.sku === selected?.sku;
+                  return (
+                    <TableRow
+                      key={row.sku}
+                      className={cn(
+                        'cursor-pointer align-top',
+                        isSelected && 'bg-muted/50 hover:bg-muted/50',
+                      )}
+                      onClick={() => setSku(row.sku)}
+                      aria-selected={isSelected}
+                    >
+                      <TableCell className="py-3 whitespace-normal">
+                        <span
+                          className={cn(
+                            'font-medium text-foreground',
+                            isSelected && 'border-l-2 border-primary pl-2',
+                          )}
+                        >
+                          {row.name}
+                        </span>
                       </TableCell>
-                    ))}
-                    <TableCell className="py-3">
-                      <SpreadNow row={row} />
-                    </TableCell>
-                    <TableCell className="py-3">
-                      <AllTime row={row} stats={stats?.data} />
+                      {MARKETPLACES.map((m) => (
+                        <TableCell key={m} className="py-3">
+                          <ListingCell
+                            cell={row.cells[m]}
+                            stats={stats?.data?.get(`${row.sku}:${m}`)}
+                            showTarget={hasTargets}
+                          />
+                        </TableCell>
+                      ))}
+                      <TableCell className="py-3">
+                        <SpreadNow row={row} />
+                      </TableCell>
+                      <TableCell className="py-3">
+                        <AllTime row={row} stats={stats?.data} />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {visible.length === 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={MARKETPLACES.length + 3}
+                      className="py-8 text-center text-muted-foreground"
+                    >
+                      No product matches "{filter}".
                     </TableCell>
                   </TableRow>
-                );
-              })}
-              {visible.length === 0 && (
-                <TableRow>
-                  <TableCell
-                    colSpan={MARKETPLACES.length + 3}
-                    className="py-8 text-center text-muted-foreground"
-                  >
-                    No product matches "{filter}".
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+                )}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
       <ProductTrendModal
