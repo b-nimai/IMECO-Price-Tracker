@@ -1,9 +1,18 @@
-import { ArrowDown, ArrowUp } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import { FilterBox, SchemaNote, Where } from '@/components/listing';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Table,
   TableBody,
@@ -177,6 +186,103 @@ function ResultsList({ rows }: { rows: SearchResultRow[] }) {
   );
 }
 
+/**
+ * One keyword's first page on every marketplace, side by side. A modal rather than a panel
+ * under the table, so it opens where you are; the arrows (or ← →) step through the keywords
+ * in the table's current order without closing it.
+ */
+function ResultsDialog({
+  keyword,
+  keywords,
+  detail,
+  today,
+  before,
+  lastDay,
+  onPick,
+}: {
+  keyword: string | null;
+  keywords: string[];
+  detail: Map<Marketplace, SearchResultRow[]>;
+  today: Map<string, SearchDayRow>;
+  before: Map<string, SearchDayRow>;
+  lastDay: string;
+  onPick: (k: string | null) => void;
+}) {
+  const at = keyword ? keywords.indexOf(keyword) : -1;
+  const prev = at > 0 ? keywords[at - 1] : null;
+  const next = at >= 0 && at < keywords.length - 1 ? keywords[at + 1] : null;
+
+  return (
+    <Dialog open={keyword != null} onOpenChange={(open) => !open && onPick(null)}>
+      <DialogContent
+        className="h-[min(56rem,calc(100dvh-2rem))] max-w-7xl"
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' && prev) onPick(prev);
+          if (e.key === 'ArrowRight' && next) onPick(next);
+        }}
+      >
+        <DialogHeader className="flex-row flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <DialogTitle className="text-lg">“{keyword}”</DialogTitle>
+            <DialogDescription>
+              First page of results, searched{' '}
+              {lastDay ? dateLabel.format(Date.parse(lastDay)) : '—'} · IMECO rows highlighted
+            </DialogDescription>
+          </div>
+          {at >= 0 && (
+            <div className="flex items-center gap-1">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                disabled={!prev}
+                onClick={() => prev && onPick(prev)}
+                aria-label="Previous keyword"
+              >
+                <ChevronLeft />
+              </Button>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {at + 1} / {keywords.length}
+              </span>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                disabled={!next}
+                onClick={() => next && onPick(next)}
+                aria-label="Next keyword"
+              >
+                <ChevronRight />
+              </Button>
+            </div>
+          )}
+        </DialogHeader>
+        <DialogBody className="p-0">
+          <div className="grid h-full gap-px bg-border lg:grid-cols-3">
+            {MARKETPLACES.map((m) => (
+              <section key={m} className="flex min-h-0 min-w-0 flex-col bg-background">
+                <div className="flex flex-none items-start justify-between gap-2 border-b border-border px-4 py-3">
+                  <Where
+                    marketplace={m}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium"
+                  />
+                  {keyword && (
+                    <RankCell
+                      today={today.get(`${keyword}:${m}`)}
+                      before={before.get(`${keyword}:${m}`)}
+                    />
+                  )}
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                  <ResultsList rows={detail.get(m) ?? []} />
+                </div>
+              </section>
+            ))}
+          </div>
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function EmptyState({ missing }: { missing: boolean }) {
   return (
     <Card className="card-glass">
@@ -203,7 +309,6 @@ function EmptyState({ missing }: { missing: boolean }) {
 export default function SearchView() {
   const [filter, setFilter] = useState('');
   const [picked, setPicked] = useState<string | null>(null);
-  const detailRef = useRef<HTMLDivElement>(null);
   const days = useRemote(fetchSearchDays, DAYS);
   const latest = useRemote(fetchSearchLatest);
 
@@ -226,19 +331,9 @@ export default function SearchView() {
     return { today, before, keywords, lastDay };
   }, [days]);
 
-  // Until someone picks, open on a keyword where IMECO shows up at all — a page of rivals with
-  // nothing of ours on it is the less useful first look.
-  const selected =
-    picked && keywords.includes(picked)
-      ? picked
-      : (keywords.find((k) => MARKETPLACES.some((m) => rankOf(today.get(`${k}:${m}`)))) ??
-        keywords[0] ??
-        null);
+  // The keyword whose results page is open in the modal, if any.
+  const selected = picked && keywords.includes(picked) ? picked : null;
 
-  function pick(k: string) {
-    setPicked(k);
-    detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return q ? keywords.filter((k) => k.toLowerCase().includes(q)) : keywords;
@@ -283,7 +378,7 @@ export default function SearchView() {
             <p className="mt-1 text-xs text-muted-foreground">
               Best organic position (an ad slot only when there is no organic one), searched{' '}
               {lastDay ? dateLabel.format(Date.parse(lastDay)) : '—'}; arrows compare with the
-              search before. Click a keyword to see the whole page below.
+              search before. Click a keyword to open its whole results page.
             </p>
           </div>
           <FilterBox value={filter} onChange={setFilter} placeholder="Filter keywords" />
@@ -308,7 +403,7 @@ export default function SearchView() {
                     'cursor-pointer align-top',
                     k === selected && 'bg-muted/50 hover:bg-muted/50',
                   )}
-                  onClick={() => pick(k)}
+                  onClick={() => setPicked(k)}
                   aria-selected={k === selected}
                 >
                   <TableCell className="py-3 font-medium text-foreground">
@@ -328,30 +423,15 @@ export default function SearchView() {
         </CardContent>
       </Card>
 
-      {selected && (
-        <Card ref={detailRef} className="card-glass min-w-0 scroll-mt-2">
-          <CardHeader>
-            <CardTitle className="text-base">
-              “{selected}”{' '}
-              <span className="text-sm font-normal text-muted-foreground">
-                — first page of results
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 lg:grid-cols-3">
-              {MARKETPLACES.map((m) => (
-                <div key={m} className="min-w-0">
-                  <div className="mb-1 text-sm font-medium">
-                    <Where marketplace={m} className="inline-flex items-center gap-1.5" />
-                  </div>
-                  <ResultsList rows={detail.get(m) ?? []} />
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <ResultsDialog
+        keyword={selected}
+        keywords={visible}
+        detail={detail}
+        today={today}
+        before={before}
+        lastDay={lastDay}
+        onPick={setPicked}
+      />
     </div>
   );
 }
