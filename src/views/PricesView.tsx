@@ -267,14 +267,14 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
           </div>
         </header>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[56rem] text-sm">
+          <table className="w-full min-w-[60rem] table-fixed text-sm">
             <thead className="sticky top-0 z-10 bg-card text-xs text-muted-foreground">
               <tr className="border-b border-border">
-                <th className="px-4 py-2 text-left font-medium">Product</th>
-                <th className="w-40 px-2 py-2 text-left font-medium">30 days</th>
-                <th className="w-20 px-2 py-2 text-right font-medium">MRP</th>
+                <th className="w-[28%] px-4 py-2 text-left font-medium">Product</th>
+                <th className="w-[20%] px-4 py-2 text-left font-medium">30 days</th>
+                <th className="w-[7%] px-2 py-2 text-right font-medium">MRP</th>
                 {MARKETPLACES.map((m) => (
-                  <th key={m} className="w-44 px-4 py-2 text-left font-medium">
+                  <th key={m} className="px-4 py-2 text-left font-medium">
                     <Where marketplace={m} className="inline-flex items-center gap-1.5" />
                   </th>
                 ))}
@@ -300,13 +300,13 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
                         <span className="text-[11px] text-muted-foreground">{row.sku}</span>
                       </div>
                     </td>
-                    <td className="px-2 py-2">
+                    <td className="px-4 py-2">
                       {spark.length ? (
                         <Sparkline
                           series={spark}
                           slots={history.days}
                           format={formatPrice}
-                          height={28}
+                          height={34}
                         />
                       ) : daily ? (
                         <span className="text-[10px] text-muted-foreground/50">no history</span>
