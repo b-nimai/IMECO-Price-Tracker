@@ -161,7 +161,10 @@ def _scrape_marketplace(
     for i, product in enumerate(listed, start=1):
         url = product.url_for(marketplace) or ""
         if marketplace == "blinkit":
-            cell = _fetch_blinkit(url, fetcher, product.sku, checks)
+            # Only IMECO's own listings get the every-store walk: with a few competitors per
+            # product it would be ~500 requests, close to an hour behind the throttle.
+            own = None if product.competitor_of else checks
+            cell = _fetch_blinkit(url, fetcher, product.sku, own)
         else:
             cell = _fetch_one(marketplace, url, fetcher)
 
