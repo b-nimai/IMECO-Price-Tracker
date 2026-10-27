@@ -52,7 +52,7 @@ export function FilterBox({
 /** For when a tab's view is not in the database yet. */
 export function SchemaNote({ view }: { view: string }) {
   return (
-    <p className="mt-1 text-xs text-amber-400">
+    <p className="mt-1 text-xs text-warn">
       This needs the <code>{view}</code> view — run <code>supabase/schema.sql</code> in the Supabase
       SQL editor.
     </p>

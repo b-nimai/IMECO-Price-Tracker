@@ -58,7 +58,7 @@ function VsTarget({ cell }: { cell: Cell }) {
   if (Math.abs(diff) < 0.005) return <span className="text-muted-foreground">on target</span>;
   const pct = `${diff > 0 ? '+' : '−'}${Math.abs(diff * 100).toFixed(0)}%`;
   return diff < 0 ? (
-    <span className="inline-flex items-center gap-1 text-amber-400" title="Selling below target SP">
+    <span className="inline-flex items-center gap-1 text-warn" title="Selling below target SP">
       <TriangleAlert className="size-3" aria-hidden />
       {pct} below
     </span>
@@ -108,7 +108,7 @@ function ListingCell({
                 : '—'}
         </span>
         {atLow && (
-          <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-emerald-400">
+          <span className="inline-flex items-center gap-0.5 text-[11px] font-medium text-good">
             <ArrowDown className="size-3" aria-hidden />
             30d low
           </span>
@@ -177,7 +177,7 @@ function SpreadNow({ row }: { row: Row }) {
       <span
         className={cn(
           'text-base font-semibold tabular-nums',
-          gap >= 0.2 ? 'text-amber-400' : 'text-foreground',
+          gap >= 0.2 ? 'text-warn' : 'text-foreground',
         )}
         title={`${MARKETPLACE_LABELS[low.marketplace]} is ${formatPct(gap)} below ${MARKETPLACE_LABELS[high.marketplace]}`}
       >

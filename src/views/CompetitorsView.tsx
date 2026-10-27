@@ -78,7 +78,7 @@ function PriceCell({
         <span
           className={cn(
             'text-xs tabular-nums',
-            diff < 0 ? 'text-amber-400' : 'text-muted-foreground',
+            diff < 0 ? 'text-warn' : 'text-muted-foreground',
           )}
         >
           {formatPrice(Math.abs(diff))} {diff < 0 ? 'cheaper' : 'dearer'} than IMECO
@@ -146,13 +146,13 @@ function GapChip({ s }: { s: Standing }) {
   if (s.gap == null || s.ours == null) return null;
   if (s.gap <= 0) {
     return (
-      <span className="inline-flex w-fit items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-400">
+      <span className="inline-flex w-fit items-center rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-good">
         {s.gap === 0 ? 'Tied cheapest' : `IMECO cheapest by ${formatPrice(-s.gap)}`}
       </span>
     );
   }
   return (
-    <span className="inline-flex w-fit items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-400 tabular-nums">
+    <span className="inline-flex w-fit items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-warn tabular-nums">
       Rival {formatPrice(s.gap)} cheaper · {formatPct(s.gap / s.ours)}
     </span>
   );
@@ -267,7 +267,7 @@ function Scorecard({
         {compared ? (
           <>
             products where IMECO is the cheapest ({formatPct(cheapest / compared)})
-            {undercut > 0 && <span className="text-amber-400"> · undercut on {undercut}</span>}
+            {undercut > 0 && <span className="text-warn"> · undercut on {undercut}</span>}
           </>
         ) : (
           'no product with both IMECO and a competitor live here'

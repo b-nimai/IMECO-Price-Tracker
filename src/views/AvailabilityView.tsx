@@ -40,12 +40,12 @@ type Sort = 'sheet' | 'longest-out';
 function InStock({ ok }: { ok: boolean }) {
   // Status, so it carries an icon and a word as well as its colour.
   return ok ? (
-    <span className="inline-flex items-center gap-1 font-medium text-emerald-400">
+    <span className="inline-flex items-center gap-1 font-medium text-good">
       <Check className="size-4" aria-hidden />
       In stock
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 font-medium text-red-400">
+    <span className="inline-flex items-center gap-1 font-medium text-bad">
       <X className="size-4" aria-hidden />
       Out of stock
     </span>
@@ -148,7 +148,7 @@ function StoreGrid({ products, stores }: { products: Row[]; stores: StoreRow[] }
                       </span>
                     ) : c.status_now === 'ok' ? (
                       <span
-                        className="inline-flex items-center gap-1 text-emerald-400 tabular-nums"
+                        className="inline-flex items-center gap-1 text-good tabular-nums"
                         title={`In stock in ${areas[i]}`}
                       >
                         <Check className="size-4" aria-label="In stock" />
@@ -156,7 +156,7 @@ function StoreGrid({ products, stores }: { products: Row[]; stores: StoreRow[] }
                       </span>
                     ) : (
                       <X
-                        className="mx-auto size-4 text-red-400"
+                        className="mx-auto size-4 text-bad"
                         aria-label={`Out of stock in ${areas[i]}`}
                       />
                     )}
@@ -165,7 +165,7 @@ function StoreGrid({ products, stores }: { products: Row[]; stores: StoreRow[] }
                 <TableCell
                   className={cn(
                     'py-2.5 text-right tabular-nums',
-                    answered.length && live === 0 ? 'text-red-400' : 'text-foreground',
+                    answered.length && live === 0 ? 'text-bad' : 'text-foreground',
                   )}
                 >
                   {answered.length ? `${live} of ${answered.length}` : '—'}

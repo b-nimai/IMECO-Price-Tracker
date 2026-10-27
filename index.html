@@ -1,14 +1,21 @@
 <!doctype html>
-<!-- Dark is pinned on <html> rather than toggled. This is a wall display: there is nobody at
-     the screen to flip a theme, and a light surface would wash out the heatmap ramp that the
-     whole page exists to carry. -->
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/imeco_logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>IMECO Price Tracker</title>
+    <!-- Dark unless the viewer chose light (see src/hooks/useTheme.ts) — applied before first
+         paint so a light-theme viewer never sees a black flash. -->
+    <script>
+      try {
+        if (localStorage.getItem('imeco-theme') === 'light') {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.style.colorScheme = 'light';
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

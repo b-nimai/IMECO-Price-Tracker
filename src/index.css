@@ -16,6 +16,9 @@
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
+    --color-good: var(--good);
+    --color-warn: var(--warn);
+    --color-bad: var(--bad);
     --color-chart-6: var(--chart-6);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
@@ -50,44 +53,57 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    /* Light theme, for a laptop in a bright office. Same structure as .dark below: a neutral
+       surface ladder (page < card < muted < border) so the only hue on screen is the data. */
+    --background: #f4f5f7;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --popover: #ffffff;
+    --popover-foreground: #0f172a;
+    --primary: #16a34a;
+    --primary-foreground: #ffffff;
+    --secondary: #eceef2;
+    --secondary-foreground: #0f172a;
+    --muted: #eef0f3;
+    --muted-foreground: #5b6472;
+    --accent: #eceef2;
+    --accent-foreground: #0f172a;
+    --destructive: #dc2626;
+    --border: #e1e4e9;
+    --input: #d6dae0;
+    --ring: rgba(22, 163, 74, 0.4);
+
+    /* Status ink, readable as text on the light card. */
+    --good: #047857;
+    --warn: #b45309;
+    --bad: #dc2626;
+
+    /* Marketplace series — the same three as dark; validated against #fff too (all pass). */
+    --chart-1: #3987e5;
+    --chart-2: #d95926;
+    --chart-3: #199e70;
+    --chart-4: #c98500;
+    --chart-5: #d55181;
+    --chart-6: #008300;
+
+    --grid-line: rgba(15, 23, 42, 0.08);
+    --axis-ink: #5b6472;
+
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --sidebar: #ffffff;
+    --sidebar-foreground: #0f172a;
+    --sidebar-primary: #16a34a;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #eef0f3;
+    --sidebar-accent-foreground: #0f172a;
+    --sidebar-border: #e1e4e9;
+    --sidebar-ring: rgba(22, 163, 74, 0.4);
 }
 
-/* IMECO wall-display palette. Ported from mission-control-dashboard's tailwind.config.js —
-   Tailwind v4 is CSS-first, so the tokens live here rather than in a config file.
-   This dashboard runs dark-only (kiosk), so :root above is left as shadcn shipped it and
-   everything real happens in .dark, which index.html pins on <html>.
+/* IMECO dark palette, the default. Ported from mission-control-dashboard's tailwind.config.js —
+   Tailwind v4 is CSS-first, so the tokens live here rather than in a config file. The light
+   theme is :root above; useTheme toggles .dark on <html>.
 
    The surface family is achromatic — true black page, neutral greys above it. It has been
    navy (#060c18) and teal (#071a1d) before now; both put a cast on a screen whose whole job
@@ -113,6 +129,10 @@
     --border: #2a2a2a;
     --input: #2a2a2a;
     --ring: rgba(34, 197, 94, 0.4);
+
+    --good: #34d399;
+    --warn: #fbbf24;
+    --bad: #f87171;
 
     /* Categorical slots 1–6 of the validated data-viz palette, in documented order.
        Validated against a navy surface (#0a1628); since the timeline was removed these are
@@ -162,8 +182,8 @@
   /* The rgba here is --card at 85%, written out because a token cannot carry the alpha the
      lattice needs to read through. Keep the two in step. */
   .card-glass {
-    background: rgba(17, 17, 17, 0.85);
-    border: 1px solid rgba(42, 42, 42, 0.8);
+    background: color-mix(in srgb, var(--card) 88%, transparent);
+    border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
     backdrop-filter: blur(12px);
   }
 
@@ -171,8 +191,8 @@
      against the black rather than a drawn grid. */
   .bg-grid {
     background-image:
-      linear-gradient(rgba(42, 42, 42, 0.35) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(42, 42, 42, 0.35) 1px, transparent 1px);
+      linear-gradient(color-mix(in srgb, var(--border) 40%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--border) 40%, transparent) 1px, transparent 1px);
     background-size: 40px 40px;
   }
 

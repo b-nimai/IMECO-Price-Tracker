@@ -47,7 +47,7 @@ function RatingCell({ r }: { r: RatingRow | undefined }) {
       )}
       {change <= -DROP_FLAG && (
         <span
-          className="inline-flex items-center gap-0.5 text-xs font-medium text-amber-400"
+          className="inline-flex items-center gap-0.5 text-xs font-medium text-warn"
           title={`Was ${r.rating_then?.toFixed(1)} on ${dateLabel.format(Date.parse(r.then_at!))}`}
         >
           <ArrowDown className="size-3" aria-hidden />
@@ -55,7 +55,7 @@ function RatingCell({ r }: { r: RatingRow | undefined }) {
         </span>
       )}
       {change >= DROP_FLAG && (
-        <span className="inline-flex items-center gap-0.5 text-xs font-medium text-emerald-400">
+        <span className="inline-flex items-center gap-0.5 text-xs font-medium text-good">
           <ArrowUp className="size-3" aria-hidden />
           {change.toFixed(1)}
         </span>

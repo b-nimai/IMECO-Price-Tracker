@@ -77,13 +77,13 @@ function RankCell({
         <span className="text-muted-foreground">Not in top {today.results}</span>
       )}
       {moved > 0 && (
-        <span className="inline-flex items-center text-xs font-medium text-emerald-400">
+        <span className="inline-flex items-center text-xs font-medium text-good">
           <ArrowUp className="size-3" aria-hidden />
           {moved}
         </span>
       )}
       {moved < 0 && (
-        <span className="inline-flex items-center text-xs font-medium text-amber-400">
+        <span className="inline-flex items-center text-xs font-medium text-warn">
           <ArrowDown className="size-3" aria-hidden />
           {-moved}
         </span>
@@ -153,7 +153,7 @@ function ResultsList({ rows }: { rows: SearchResultRow[] }) {
             {/* A fixed slot whether or not there is a badge, so titles line up down the list. */}
             <span className="w-7 shrink-0">
               {r.sponsored && (
-                <Badge variant="outline" className="h-4 px-1 text-[9px] text-amber-400">
+                <Badge variant="outline" className="h-4 px-1 text-[9px] text-warn">
                   AD
                 </Badge>
               )}

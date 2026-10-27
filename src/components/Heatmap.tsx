@@ -26,8 +26,8 @@ import { cn } from '@/lib/utils';
  * a grid rather than a wall of numbers.
  */
 const PLATE: CSSProperties = {
-  backgroundColor: '#000000',
-  color: '#ffffff',
+  backgroundColor: 'var(--card)',
+  color: 'var(--foreground)',
   boxShadow: 'inset 0 0 0 1px var(--border)',
 };
 
