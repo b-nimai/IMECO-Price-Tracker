@@ -91,20 +91,24 @@ class Store:
                 "urls": p.urls,
                 "brand": p.brand,
                 "competitor_of": p.competitor_of,
+                "tsp": p.tsp,
                 "updated_at": "now()",
             }
             for p in products
         ]
 
         degraded = False
-        for _ in range(3):  # at most: drop competitors, then drop position
+        for _ in range(4):  # at most: drop tsp, drop competitors, then drop position
             try:
                 for i in range(0, len(rows), CHUNK):
                     self._post("products", rows[i : i + CHUNK], upsert=True)
                 break
             except RuntimeError as exc:
                 message = str(exc)
-                if ("brand" in message or "competitor_of" in message) and "brand" in rows[0]:
+                if "tsp" in message and "tsp" in rows[0]:
+                    for row in rows:
+                        row.pop("tsp")
+                elif ("brand" in message or "competitor_of" in message) and "brand" in rows[0]:
                     rows = [
                         {k: v for k, v in r.items() if k not in ("brand", "competitor_of")}
                         for r in rows

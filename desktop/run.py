@@ -298,6 +298,7 @@ def write_fixture(path: Path, products: list[Product], results: list[tuple[str, 
                 # alphabetically — a different board from the one it is supposed to stand in for.
                 "position": p.position,
                 "target_sp": p.target_sp,
+                "tsp": p.tsp,
                 "urls": p.urls,
             }
             for p in products

@@ -310,6 +310,7 @@ def _read_sheet(ws, path: Path, main: bool) -> tuple[list[Product], list[_Rival]
     sku_col, name_col, mrp_col = fixed.get("sku"), fixed.get("product name"), fixed.get("mrp")
     of_col, brand_col = fixed.get("competitor of"), fixed.get("brand")
     kw_col = fixed.get("keywords", fixed.get("keyword"))
+    tsp_col = fixed.get("target selling price", fixed.get("tsp"))
     slots = _competitor_columns(fixed, cols)
     if main and (sku_col is None or name_col is None):
         raise ValueError(f"{path.name}: missing required 'SKU' / 'Product Name' headers")
@@ -353,6 +354,7 @@ def _read_sheet(ws, path: Path, main: bool) -> tuple[list[Product], list[_Rival]
             # not matching a row number in Excel.
             position=len(own),
             keywords=split_keywords(_cell(row, kw_col)),
+            tsp=parse_price(_cell(row, tsp_col)),
         )
         _read_listings(product, row, cols)
         own.append(product)

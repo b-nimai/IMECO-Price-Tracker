@@ -1,4 +1,4 @@
-import { Trophy } from 'lucide-react';
+import { ArrowDown, ArrowUp, Trophy } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { DeltaPill } from '@/components/charts/DeltaPill';
@@ -6,7 +6,7 @@ import { Sparkline } from '@/components/charts/Sparkline';
 import { StackedBar } from '@/components/charts/StackedBar';
 import { FilterBox, Segmented, Where } from '@/components/listing';
 import { ProductTrendModal } from '@/components/ProductTrendModal';
-import { live } from '@/data/competition';
+import { live, tspStanding } from '@/data/competition';
 import { formatPct, formatPrice } from '@/data/format';
 import { fetchPriceDaily, fetchPriceStats } from '@/data/supabaseClient';
 import {
@@ -125,18 +125,30 @@ function PriceCell({
   }
   const off = discount(cell, row);
   const change = yesterday != null && yesterday !== price ? price / yesterday - 1 : null;
+  const standing = tspStanding(price, row.tsp);
+  const vsTsp =
+    standing === 'below'
+      ? `${formatPrice(row.tsp! - price)} below TSP ${formatPrice(row.tsp!)}`
+      : standing === 'above'
+        ? `${formatPrice(price - row.tsp!)} above TSP ${formatPrice(row.tsp!)}`
+        : standing === 'at'
+          ? `At TSP ${formatPrice(row.tsp!)}`
+          : null;
   return (
     <div
       className={cn(
         '-mx-2 flex flex-col gap-0.5 rounded-lg px-2 py-1',
-        best && 'bg-emerald-500/10 ring-1 ring-emerald-500/40',
+        standing === 'below' && 'bg-rose-500/10 ring-1 ring-rose-500/40',
+        (standing === 'at' || standing === 'above') && 'bg-emerald-500/10 ring-1 ring-emerald-500/40',
       )}
-      title={[cell.note, cell.unit].filter(Boolean).join(' · ') || undefined}
+      title={[vsTsp, cell.note, cell.unit].filter(Boolean).join(' · ') || undefined}
     >
       <span className="flex items-center gap-1.5">
         <span className="text-base font-semibold text-foreground tabular-nums">
           {formatPrice(price)}
         </span>
+        {standing === 'below' && <ArrowDown className="size-4 text-bad" aria-label={vsTsp!} />}
+        {standing === 'above' && <ArrowUp className="size-4 text-good" aria-label={vsTsp!} />}
         {best && <Trophy className="size-3 text-good" aria-label="Cheapest" />}
         {change != null && <DeltaPill delta={change} format={(v) => formatPct(v)} good="neutral" />}
       </span>
@@ -260,8 +272,16 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
             ]}
           />
           <div className="flex items-center gap-3">
-            <span className="hidden items-center gap-1 text-[11px] text-muted-foreground lg:inline-flex">
-              <Trophy className="size-3 text-good" aria-hidden /> cheapest marketplace
+            <span className="hidden items-center gap-3 text-[11px] text-muted-foreground lg:inline-flex">
+              <span className="inline-flex items-center gap-1">
+                <ArrowDown className="size-3 text-bad" aria-hidden /> below TSP
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <ArrowUp className="size-3 text-good" aria-hidden /> above TSP
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <Trophy className="size-3 text-good" aria-hidden /> cheapest marketplace
+              </span>
             </span>
             <FilterBox value={filter} onChange={setFilter} />
           </div>
@@ -270,9 +290,15 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
           <table className="w-full min-w-[60rem] table-fixed text-sm">
             <thead className="sticky top-0 z-10 bg-card text-xs text-muted-foreground">
               <tr className="border-b border-border">
-                <th className="w-[28%] px-4 py-2 text-left font-medium">Product</th>
-                <th className="w-[20%] px-4 py-2 text-left font-medium">30 days</th>
-                <th className="w-[7%] px-2 py-2 text-right font-medium">MRP</th>
+                <th className="w-[26%] px-4 py-2 text-left font-medium">Product</th>
+                <th className="w-[16%] px-4 py-2 text-left font-medium">30 days</th>
+                <th className="w-[6%] px-2 py-2 text-right font-medium">MRP</th>
+                <th
+                  className="w-[6%] px-2 py-2 text-right font-medium"
+                  title="Target Selling Price"
+                >
+                  TSP
+                </th>
                 {MARKETPLACES.map((m) => (
                   <th key={m} className="px-4 py-2 text-left font-medium">
                     <Where marketplace={m} className="inline-flex items-center gap-1.5" />
@@ -317,6 +343,9 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
                     <td className="px-2 py-2 text-right text-muted-foreground tabular-nums">
                       {row.mrp != null ? formatPrice(row.mrp) : '—'}
                     </td>
+                    <td className="px-2 py-2 text-right font-medium text-foreground tabular-nums">
+                      {row.tsp != null ? formatPrice(row.tsp) : '—'}
+                    </td>
                     {MARKETPLACES.map((m) => (
                       <td key={m} className="px-4 py-2">
                         <PriceCell
@@ -332,7 +361,7 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
               })}
               {!visible.length && (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-muted-foreground">
+                  <td colSpan={7} className="py-10 text-center text-muted-foreground">
                     No product matches “{filter}”.
                   </td>
                 </tr>

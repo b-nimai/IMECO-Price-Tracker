@@ -85,4 +85,9 @@ describe('buildPriceData', () => {
     const data = buildPriceData([product('OURS', 0), orphan], []);
     expect(data.rows.map((r) => r.sku)).toEqual(['OURS']);
   });
+
+  it('carries the TSP on our rows, and reads a database without the column as none', () => {
+    const data = buildPriceData([{ ...product('A', 0), tsp: 369 }, product('B', 1)], []);
+    expect(data.rows.map((r) => r.tsp)).toEqual([369, null]);
+  });
 });

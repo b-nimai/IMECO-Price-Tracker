@@ -81,6 +81,8 @@ export interface Row {
   position: number | null;
   /** The spreadsheet's MRP — what the pinned column shows. */
   mrp: number | null;
+  /** The spreadsheet's Target Selling Price. One per product; IMECO's own rows only. */
+  tsp: number | null;
   cells: Record<Marketplace, Cell>;
   /** Cheapest live price across marketplaces, for the `cheapest` metric. */
   minPrice: number | null;
@@ -127,6 +129,8 @@ export interface ProductRow {
   /** Absent on a database without the competitor migration — every row is then IMECO's. */
   brand?: string | null;
   competitor_of?: string | null;
+  /** Absent on a database without the `tsp` migration. */
+  tsp?: number | null;
 }
 
 /**
@@ -303,6 +307,7 @@ export function buildPriceData(
       starred: product.starred,
       position: product.position ?? null,
       mrp: product.mrp,
+      tsp: rival ? null : (product.tsp ?? null),
       cells,
       minPrice,
       liveCount: buyable.length,

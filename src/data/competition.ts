@@ -26,6 +26,20 @@ export function live(cell: Cell): number | null {
   return cell.status === 'ok' && cell.price != null ? cell.price : null;
 }
 
+export type TspStanding = 'below' | 'at' | 'above';
+
+/**
+ * Where a selling price sits against the Target Selling Price, or null without a target.
+ *
+ * Compared in whole rupees because that is what the board prints: ₹228.60 shows as ₹229, and
+ * marking it below a ₹229 target would contradict the two numbers on screen.
+ */
+export function tspStanding(price: number, tsp: number | null): TspStanding | null {
+  if (!tsp) return null;
+  const gap = Math.round(price) - Math.round(tsp);
+  return gap < 0 ? 'below' : gap > 0 ? 'above' : 'at';
+}
+
 /** Each IMECO product that has competitors, with them, both in sheet order. */
 export function buildGroups(rows: Row[], competitors: Row[]): Group[] {
   const bySku = new Map<string, Row[]>();

@@ -64,7 +64,7 @@ const PRODUCT_COLS = 'sku,name,mrp,starred,target_sp,urls';
 /**
  * The catalogue, in the spreadsheet's own row order.
  *
- * `position`, then `brand` / `competitor_of`, were added to the schema after this dashboard
+ * `position`, `brand` / `competitor_of`, then `tsp` were added to the schema after this dashboard
  * shipped, and PostgREST answers a request for a column that does not exist with a 400 rather
  * than by ignoring it. So a database that has not had the migrations in supabase/schema.sql
  * applied would show no prices at all — the fallbacks below are what stop a pending migration
@@ -72,6 +72,7 @@ const PRODUCT_COLS = 'sku,name,mrp,starred,target_sp,urls';
  */
 async function fetchProducts(): Promise<ProductRow[]> {
   const attempts = [
+    `${PRODUCT_COLS},position,brand,competitor_of,tsp&order=position.asc.nullslast`,
     `${PRODUCT_COLS},position,brand,competitor_of&order=position.asc.nullslast`,
     `${PRODUCT_COLS},position&order=position.asc.nullslast`,
     PRODUCT_COLS,
@@ -81,7 +82,7 @@ async function fetchProducts(): Promise<ProductRow[]> {
       return await get<ProductRow[]>(`products?select=${cols}`, 'products');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const missing = /position|brand|competitor_of/.exec(message)?.[0];
+      const missing = /\btsp\b|position|brand|competitor_of/.exec(message)?.[0];
       if (!missing || i === attempts.length - 1) throw err;
       console.warn(`[prices] products.${missing} missing — run supabase/schema.sql`);
     }

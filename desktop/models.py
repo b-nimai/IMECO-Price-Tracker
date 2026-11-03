@@ -126,6 +126,9 @@ class Product:
     which is how the dashboard keeps competitors off the wall display."""
     keywords: list[str] = field(default_factory=list)
     """Search keywords typed in this product's "Keywords" cell, for the daily search."""
+    tsp: float | None = None
+    """Target Selling Price from the sheet: one price for the product, whichever marketplace
+    sells it. The Prices tab marks each live price against it. None where the sheet has none."""
 
     def url_for(self, marketplace: str) -> str | None:
         return self.urls.get(marketplace)

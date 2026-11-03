@@ -36,6 +36,10 @@ alter table products add column if not exists competitor_of text
   references products(sku) on delete set null;
 create index if not exists products_competitor_of_idx on products (competitor_of);
 
+-- MIGRATION: the sheet's "Target Selling Price" column. One price per product, whichever
+-- marketplace sells it; the Prices tab marks each live price against it.
+alter table products add column if not exists tsp numeric;
+
 -- One row per execution of the desktop app.
 create table if not exists runs (
   id            uuid primary key default gen_random_uuid(),

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildGroups, ordinal, standing, winLoss } from './competition';
+import { buildGroups, ordinal, standing, tspStanding, winLoss } from './competition';
 import type { Cell, Marketplace, Row } from './types';
 
 function cell(marketplace: Marketplace, price: number | null, status = 'ok'): Cell {
@@ -26,6 +26,7 @@ function row(sku: string, amazon: number | null, competitorOf: string | null = n
     starred: false,
     position: 0,
     mrp: null,
+    tsp: null,
     cells: {
       amazon: cell('amazon', amazon),
       flipkart: cell('flipkart', null),
@@ -60,6 +61,23 @@ describe('winLoss', () => {
       [row('RA', 120, 'A'), row('RB', 100, 'B'), row('RC', 90, 'C')],
     );
     expect(winLoss(groups)).toEqual({ cheapest: 1, tied: 1, undercut: 1 });
+  });
+});
+
+describe('tspStanding', () => {
+  it('places a price below, at or above the target', () => {
+    expect(tspStanding(278, 369)).toBe('below');
+    expect(tspStanding(369, 369)).toBe('at');
+    expect(tspStanding(399, 369)).toBe('above');
+  });
+
+  it('agrees with the whole rupees the board prints', () => {
+    expect(tspStanding(228.6, 229)).toBe('at');
+    expect(tspStanding(228.4, 229)).toBe('below');
+  });
+
+  it('has no opinion without a target', () => {
+    expect(tspStanding(278, null)).toBeNull();
   });
 });
 
