@@ -60,7 +60,9 @@ def parse(html: str, url: str) -> Cell:
     return Cell(
         marketplace="myntra",
         status=Status.OUT_OF_STOCK if sold_out else Status.OK,
-        price=price,
+        # A sold-out page reports `discounted` = MRP (all 14 sold-out listings on 2026-11-04), which
+        # is not what the item sells for. Storing it would read as a price jump in the history.
+        price=None if sold_out else price,
         mrp=mrp,
         url=url,
         note="out of stock on Myntra" if sold_out else None,

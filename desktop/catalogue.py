@@ -121,11 +121,12 @@ HEADERS: dict[str, tuple[str, str]] = {
     "amazon link": ("amazon", "link"),
     "flipkart sp": ("flipkart", "sp"),
     "flipkart link": ("flipkart", "link"),
-    # The sheet still has "Myntra SP" / "Myntra Link" columns. They are deliberately NOT mapped:
-    # Myntra was dropped, and an unmapped header is simply ignored, so the links never reach
-    # `Product.urls` and never get counted as listings to fetch.
     "blinkit sp": ("blinkit", "sp"),
     "blinkit link": ("blinkit", "link"),
+    "myntra sp": ("myntra", "sp"),
+    "myntra link": ("myntra", "link"),
+    # "Meesho Link" is deliberately NOT mapped: Meesho refuses automated requests (see README),
+    # and an unmapped header is simply ignored, so its links are never counted as listings to fetch.
 }
 
 
@@ -367,7 +368,7 @@ def _read_sheet(ws, path: Path, main: bool) -> tuple[list[Product], list[_Rival]
 
 # "Competitor 2 Amazon Link", "competitor 2 brand", "Competitor2 Flipkart Link", ...
 _COMPETITOR_COLUMN = re.compile(
-    r"^competitor\s*(\d+)\s*(brand|name|product name|amazon link|flipkart link|blinkit link)$"
+    r"^competitor\s*(\d+)\s*(brand|name|product name|amazon link|flipkart link|blinkit link|myntra link)$"
 )
 
 
@@ -396,7 +397,7 @@ def _rival_from_columns(row: tuple, fields: dict[str, int], of: str) -> Product 
         brand=str(_cell(row, fields.get("brand")) or "").strip() or "Unknown brand",
         competitor_of=of,
     )
-    for marketplace in ("amazon", "flipkart", "blinkit"):
+    for marketplace in LISTING_ID:
         raw = _cell(row, fields.get(f"{marketplace} link"))
         url = canonical_url(marketplace, str(raw)) if raw else None
         if url:
@@ -415,17 +416,20 @@ def _rival_from_columns(row: tuple, fields: dict[str, int], of: str) -> Product 
 # sheet is edited. The older row form — a row with "Competitor Of" set to the IMECO SKU, on this
 # sheet or on a separate "Competitors" sheet — is read by the same rules.
 COMPETITOR_SHEET = "competitors"
+# In key-priority order. New marketplaces go LAST: a competitor's key comes from its first link
+# found here, so reordering would re-key existing competitors and orphan their price history.
 LISTING_ID = {
     "amazon": re.compile(r"/dp/([A-Z0-9]{10})"),
     "flipkart": re.compile(r"[?&]pid=([A-Z0-9]+)"),
     "blinkit": re.compile(r"/prid/(\d+)"),
+    "myntra": re.compile(r"/(\d+)(?:/buy)?/?(?:[?#]|$)"),
 }
 
 
 def _competitor_key(product: Product) -> str | None:
     """`C:<IMECO SKU>:<marketplace>:<listing id>`. The IMECO SKU is part of it so the same rival
     listing can be compared against more than one of our products."""
-    for marketplace in ("amazon", "flipkart", "blinkit"):
+    for marketplace in LISTING_ID:
         url = product.urls.get(marketplace)
         m = url and LISTING_ID[marketplace].search(url)
         if m:

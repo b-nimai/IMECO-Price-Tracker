@@ -67,7 +67,8 @@ function AvailabilityCell({ row, stats }: { row: Row; stats: AvailabilityRow | u
     <div className="flex flex-col gap-0.5" title={row.name}>
       <InStock ok={stats.status_now === 'ok'} />
       <span className="text-xs text-muted-foreground">
-        {stats.unchanged_30d
+        {/* A newly added listing has not changed either, but it has not had 30 days yet. */}
+        {stats.unchanged_30d && Date.now() - Date.parse(stats.status_since) > 29 * 86_400_000
           ? 'all of the last 30 days'
           : `since ${since.format(Date.parse(stats.status_since))}`}
       </span>
@@ -256,7 +257,7 @@ export default function AvailabilityView({ rows }: { rows: Row[] }) {
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {MARKETPLACES.map((m) => (
           <Scorecard
             key={m}

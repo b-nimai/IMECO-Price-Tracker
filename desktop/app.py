@@ -58,7 +58,7 @@ class App:
 
         root.title("IMECO Price Tracker")
         root.configure(bg=BG)
-        root.geometry("560x450")
+        root.geometry("560x480")
         root.resizable(False, False)
 
         tk.Label(
@@ -99,7 +99,7 @@ class App:
             self.bars[marketplace] = bar
             self.labels[marketplace] = label
 
-        # The save at the end, as its own row: it has its own wait, after the three are full.
+        # The save at the end, as its own row: it has its own wait, after the others are full.
         tk.Label(
             grid, text="Saving", bg=BG, fg=FG,
             font=("Segoe UI", 9), width=10, anchor="w",
@@ -218,7 +218,7 @@ class App:
             # The scheduled task runs the exe with --silent, which goes through run.main; this
             # is the button. Both run the same stages — IMECO first and saved at once, then this
             # hour's competitors and dark stores, then the keywords still due today — and each
-            # stage restarts the three bars, so a long run never sits on full bars.
+            # stage restarts the bars, so a long run never sits on full bars.
             report = execute_run(
                 settings,
                 products,
@@ -334,6 +334,9 @@ class App:
         if self.phase.startswith("Saving"):
             rows = [("saving", self.save_label)]
         for key, label in rows:
+            if self.counts.get(key) == (0, 0):  # told it has nothing to do this stage
+                label.config(text="-", fg=MUTED)
+                continue
             done, total = self.counts.get(key, (0, 0))
             finished = total and done >= total
             text = f"{done}/{total}" if total else ""

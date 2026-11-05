@@ -31,6 +31,7 @@ function row(sku: string, amazon: number | null, competitorOf: string | null = n
       amazon: cell('amazon', amazon),
       flipkart: cell('flipkart', null),
       blinkit: cell('blinkit', null),
+      myntra: cell('myntra', null),
     },
     minPrice: amazon,
     liveCount: amazon == null ? 0 : 1,

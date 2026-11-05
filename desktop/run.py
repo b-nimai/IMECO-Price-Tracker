@@ -33,10 +33,19 @@ from .adapters import PARSERS
 from .catalogue import USER_WORKBOOK, load_products
 from .config import Settings, load_settings
 from .fetch import BLINKIT_LOCATIONS, Fetcher
-from .models import MARKETPLACES, Cell, LocationCheck, Product, Status, Via
+from .models import (
+    MARKETPLACES,
+    OWN_ONLY_MARKETPLACES,
+    Cell,
+    LocationCheck,
+    Product,
+    Status,
+    Via,
+)
 from .search import (
     DEFAULT_KEYWORDS,
     SEARCH_FROM_HOUR,
+    SEARCH_MARKETPLACES,
     SearchResult,
     load_keywords,
     search,
@@ -197,6 +206,8 @@ def _scrape_marketplace(
         listed += [p for p in walk_only if p.url_for("blinkit")]
     total = len(listed)
     out: list[tuple[str, Cell]] = []
+    if on_progress and not total:
+        on_progress(marketplace, 0, 0)  # nothing to do this stage: the window shows it as idle
 
     for i, product in enumerate(listed, start=1):
         url = product.url_for(marketplace) or ""
@@ -252,6 +263,10 @@ def scrape(
     # failed", which is exactly the confusion the status vocabulary exists to prevent.
     for product in products:
         for marketplace in MARKETPLACES:
+            # The dashboard already shows these as not listed; a row per rival per run is ~60 an
+            # hour of storage that says nothing.
+            if product.competitor_of and marketplace in OWN_ONLY_MARKETPLACES:
+                continue
             if not product.url_for(marketplace):
                 results.append(
                     (
@@ -425,6 +440,9 @@ def execute_run(
 
         if keywords:
             phase(f"Searching {len(keywords)} keywords", True)
+            if on_progress:
+                for marketplace in set(MARKETPLACES) - set(SEARCH_MARKETPLACES):
+                    on_progress(marketplace, 0, 0)  # no search here: idle, not still working
             report.searches, issues = run_search(keywords, products, fetcher, on_progress)
             report.problems += issues
             write_search_log(report.searches, report.problems)
@@ -457,7 +475,7 @@ def keywords_due(
         keywords = load_keywords(products=products)
     except Exception as exc:
         problems.append(f"{exc} — searched the default keywords instead")
-        keywords = [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
+        keywords = [(k, SEARCH_MARKETPLACES) for k in DEFAULT_KEYWORDS]
     if force:
         return keywords, problems
     if datetime.now().hour < SEARCH_FROM_HOUR or not settings.can_store:
@@ -488,7 +506,7 @@ SEARCH_LOG = USER_WORKBOOK.parent / "last-search.txt"
 def write_search_log(results: list[SearchResult], problems: list[str]) -> Path | None:
     """Per-marketplace result counts and every problem, overwriting the previous search's."""
     lines = [f"Keyword search at {datetime.now():%d %b %Y %H:%M}"]
-    for marketplace in MARKETPLACES:
+    for marketplace in SEARCH_MARKETPLACES:
         found = sum(r.marketplace == marketplace for r in results)
         lines.append(f"  {marketplace:<9} {found} results")
     lines += ["", f"{len(problems)} problems:" if problems else "No problems."]

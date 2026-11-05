@@ -47,10 +47,12 @@ class Via(str, Enum):
     """No request was made at all — the SKU has no link for this marketplace."""
 
 
-# Myntra was dropped — its prices are no longer wanted, so it is not scraped. The database
-# CHECK constraint still ALLOWS 'myntra' so historical snapshots stay valid; nothing writes it.
-# Mirrors src/data/types.ts — the two must stay in step.
-MARKETPLACES = ("amazon", "flipkart", "blinkit")
+# Mirrors src/data/types.ts — the two must stay in step. Every value must also be allowed by the
+# marketplace CHECK constraint on price_snapshots (supabase/schema.sql), or the save fails.
+MARKETPLACES = ("amazon", "flipkart", "blinkit", "myntra")
+
+#: The sheet has competitor links for the other marketplaces, but not this one.
+OWN_ONLY_MARKETPLACES = ("myntra",)
 
 
 @dataclass

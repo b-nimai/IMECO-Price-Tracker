@@ -62,8 +62,8 @@ reordering columns is safe. Recognised headers:
 SKU | Product Name | MRP | <Marketplace> SP | <Marketplace> Link
 ```
 
-for `Amazon`, `Flipkart` and `Blinkit`. Anything else — `Meesho Link`, or the sheet's leftover
-`Myntra Link` column — is ignored. A missing `<Marketplace> Link` means that cell renders as "not listed" rather than
+for `Amazon`, `Flipkart`, `Blinkit` and `Myntra`. Anything else — including `Meesho Link` — is
+ignored. A missing `<Marketplace> Link` means that cell renders as "not listed" rather than
 as a failure.
 
 **Updating it does not need a rebuild.** The `.exe` ships with a copy of the sheet so a fresh
@@ -146,6 +146,7 @@ A full run takes **~3.5 minutes** for ~89 listings (more once Blinkit links are 
 | Amazon | direct | `a-price-whole`, `displayPrice` | MRP from `apex-basisprice-value` |
 | Flipkart | direct | `ppd.fsp` in the embedded state | |
 | Blinkit | direct | `schema.org/Product` JSON-LD | Also reports real stock status |
+| Myntra | direct | `price.discounted` in the `__myx` state | IMECO's own listings only; not in the keyword search |
 
 **Meesho is not supported.** Its pages are behind an Akamai anti-bot wall that refused every
 method tested: plain HTTP, headless Chromium, headed Chromium, real Chrome with a persistent

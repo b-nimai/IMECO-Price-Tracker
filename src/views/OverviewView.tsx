@@ -42,6 +42,7 @@ import {
   MARKETPLACE_COLORS,
   MARKETPLACE_LABELS,
   MARKETPLACES,
+  RIVAL_MARKETPLACES,
   sheetOrder,
   type Marketplace,
   type Row,
@@ -462,7 +463,7 @@ export default function OverviewView({
           action={<LinkButton onClick={() => onNavigate('competitors')}>Competitors</LinkButton>}
         >
           <div className="flex flex-col gap-4">
-            {MARKETPLACES.map((m) => {
+            {RIVAL_MARKETPLACES.map((m) => {
               const w = winLoss(groups, [m]);
               const n = w.cheapest + w.tied + w.undercut;
               return (
@@ -492,7 +493,7 @@ export default function OverviewView({
           icon={Boxes}
           action={<LinkButton onClick={() => onNavigate('availability')}>Stock</LinkButton>}
         >
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             {MARKETPLACES.map((m) => {
               const listed = rows.filter((r) => r.cells[m].url);
               const ok = listed.filter((r) => r.cells[m].status === 'ok').length;
@@ -501,7 +502,7 @@ export default function OverviewView({
                   <Ring
                     value={listed.length ? ok / listed.length : null}
                     color={MARKETPLACE_COLORS[m]}
-                    size={64}
+                    size={56}
                   />
                   <span className="text-[11px] text-muted-foreground">{MARKETPLACE_LABELS[m]}</span>
                   <span className="text-[10px] text-muted-foreground/70 tabular-nums">

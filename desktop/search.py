@@ -34,7 +34,7 @@ from openpyxl import load_workbook
 
 from .catalogue import LISTING_ID, active_workbook
 from .fetch import Fetcher
-from .models import MARKETPLACES, Product
+from .models import Product
 
 #: Brand names IMECO sells under. Some of the catalogue is branded "Good Habbit" (and is spelt
 #: "Good Habit" on at least one listing), so a title naming either is ours.
@@ -214,6 +214,9 @@ def parse_blinkit(text: str) -> list[SearchResult]:
 
 PARSERS = {"amazon": parse_amazon, "flipkart": parse_flipkart, "blinkit": parse_blinkit}
 
+#: Where keywords are searched. Narrower than models.MARKETPLACES: Myntra is priced, not searched.
+SEARCH_MARKETPLACES = tuple(PARSERS)
+
 
 # ── whose is it ─────────────────────────────────────────────────────────────────────────
 
@@ -284,7 +287,7 @@ def load_keywords(
     for p in products:
         if p.competitor_of is None:
             for keyword in p.keywords:
-                add(keyword, MARKETPLACES)
+                add(keyword, SEARCH_MARKETPLACES)
 
     sheet = None
     if path.exists():
@@ -301,9 +304,9 @@ def load_keywords(
             for row in rows:
                 keyword = str(row[kw_col] or "") if kw_col < len(row) else ""
                 raw = str(row[mp_col] or "") if mp_col is not None and mp_col < len(row) else ""
-                add(keyword, tuple(m for m in MARKETPLACES if m in raw.lower()) or MARKETPLACES)
+                add(keyword, tuple(m for m in SEARCH_MARKETPLACES if m in raw.lower()) or SEARCH_MARKETPLACES)
 
-    return out or [(k, MARKETPLACES) for k in DEFAULT_KEYWORDS]
+    return out or [(k, SEARCH_MARKETPLACES) for k in DEFAULT_KEYWORDS]
 
 
 # ── doing it ────────────────────────────────────────────────────────────────────────────
@@ -351,8 +354,8 @@ def search(
 
     results: list[SearchResult] = []
     problems: list[str] = []
-    with ThreadPoolExecutor(max_workers=len(MARKETPLACES)) as pool:
-        for found, issues in pool.map(one_marketplace, MARKETPLACES):
+    with ThreadPoolExecutor(max_workers=len(SEARCH_MARKETPLACES)) as pool:
+        for found, issues in pool.map(one_marketplace, SEARCH_MARKETPLACES):
             results.extend(found)
             problems.extend(issues)
 
@@ -367,12 +370,12 @@ def _main(argv: list[str]) -> int:
     if sys.stdout is not None:  # None under pythonw.exe — see run.main()
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     products = load_products()
-    keywords = [(k, MARKETPLACES) for k in argv] or load_keywords(products=products)
+    keywords = [(k, SEARCH_MARKETPLACES) for k in argv] or load_keywords(products=products)
     with Fetcher(load_settings()) as fetcher:
         results, problems = search(keywords, fetcher, products)
 
     for keyword, _ in keywords:
-        for marketplace in MARKETPLACES:
+        for marketplace in SEARCH_MARKETPLACES:
             rows = [r for r in results if r.keyword == keyword and r.marketplace == marketplace]
             if not rows:
                 continue

@@ -253,7 +253,7 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {MARKETPLACES.map((m) => (
           <MarketCard key={m} m={m} rows={rows} />
         ))}
@@ -287,11 +287,11 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
           </div>
         </header>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[60rem] table-fixed text-sm">
+          <table className="w-full min-w-[68rem] table-fixed text-sm">
             <thead className="sticky top-0 z-10 bg-card text-xs text-muted-foreground">
               <tr className="border-b border-border">
-                <th className="w-[26%] px-4 py-2 text-left font-medium">Product</th>
-                <th className="w-[16%] px-4 py-2 text-left font-medium">30 days</th>
+                <th className="w-[24%] px-4 py-2 text-left font-medium">Product</th>
+                <th className="w-[14%] px-4 py-2 text-left font-medium">30 days</th>
                 <th className="w-[6%] px-2 py-2 text-right font-medium">MRP</th>
                 <th
                   className="w-[6%] px-2 py-2 text-right font-medium"
@@ -361,7 +361,10 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
               })}
               {!visible.length && (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-muted-foreground">
+                  <td
+                    colSpan={MARKETPLACES.length + 4}
+                    className="py-10 text-center text-muted-foreground"
+                  >
                     No product matches “{filter}”.
                   </td>
                 </tr>
