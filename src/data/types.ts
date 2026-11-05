@@ -1,27 +1,33 @@
 // The shapes the dashboard works in, and the transform from Supabase rows into them.
 
-// Myntra was dropped — its prices are no longer wanted. Historical myntra snapshots are still in
-// the database and are simply ignored here: `buildPriceData` skips any marketplace not in this
-// tuple, so nothing has to be deleted for the column to disappear.
-export const MARKETPLACES = ['amazon', 'flipkart', 'blinkit'] as const;
+// Mirrors desktop/models.py — the two must stay in step. `buildPriceData` skips any marketplace
+// not in this tuple, so taking one out hides its column without deleting its history.
+export const MARKETPLACES = ['amazon', 'flipkart', 'blinkit', 'myntra'] as const;
 export type Marketplace = (typeof MARKETPLACES)[number];
+
+/** Where the sheet has competitor links. Myntra tracks IMECO's own listings only. */
+export const RIVAL_MARKETPLACES = ['amazon', 'flipkart', 'blinkit'] as const;
+
+/** Where the daily keyword search runs — mirrors SEARCH_MARKETPLACES in desktop/search.py. */
+export const SEARCH_MARKETPLACES = ['amazon', 'flipkart', 'blinkit'] as const;
 
 export const MARKETPLACE_LABELS: Record<Marketplace, string> = {
   amazon: 'Amazon',
   flipkart: 'Flipkart',
   blinkit: 'Blinkit',
+  myntra: 'Myntra',
 };
 
 /**
  * Series colour per marketplace, for charts. Fixed to the marketplace, never to its rank, so a
- * channel keeps its colour when another drops out. These are the first three `--chart-*` slots
- * of the dark theme, validated as a set against the #111 card surface (colour-blind separation
- * and 3:1 contrast all pass).
+ * channel keeps its colour when another drops out. These are the first `--chart-*` slots of the
+ * theme, in order.
  */
 export const MARKETPLACE_COLORS: Record<Marketplace, string> = {
   amazon: 'var(--chart-1)',
   flipkart: 'var(--chart-2)',
   blinkit: 'var(--chart-3)',
+  myntra: 'var(--chart-4)',
 };
 
 /**

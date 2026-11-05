@@ -14,14 +14,13 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from ..models import Cell
-from . import amazon, blinkit, flipkart
+from . import amazon, blinkit, flipkart, myntra
 
-# No myntra entry: the marketplace was dropped. `myntra.py` is kept on disk, unimported, so
-# putting the column back is a two-line change rather than a rewrite of the parser.
 PARSERS: dict[str, Callable[[str, str], Cell]] = {
     "amazon": amazon.parse,
     "flipkart": flipkart.parse,
     "blinkit": blinkit.parse,
+    "myntra": myntra.parse,
 }
 
-__all__ = ["PARSERS", "amazon", "blinkit", "flipkart"]
+__all__ = ["PARSERS", "amazon", "blinkit", "flipkart", "myntra"]

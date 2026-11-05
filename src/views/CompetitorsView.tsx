@@ -29,7 +29,7 @@ import { formatPct, formatPrice } from '@/data/format';
 import { fetchRatings, type RatingRow } from '@/data/supabaseClient';
 import {
   MARKETPLACE_LABELS,
-  MARKETPLACES,
+  RIVAL_MARKETPLACES,
   type Cell,
   type Marketplace,
   type Row,
@@ -241,7 +241,7 @@ function Scorecard({
 function RivalBoard({ groups }: { groups: Group[] }) {
   const counts = new Map<string, number>();
   for (const g of groups) {
-    for (const m of MARKETPLACES) {
+    for (const m of RIVAL_MARKETPLACES) {
       const s = standing(g, m);
       if (s.gap != null && s.gap > 0 && s.best) {
         counts.set(s.best.row.brand, (counts.get(s.best.row.brand) ?? 0) + 1);
@@ -302,7 +302,7 @@ function GroupDialog({
       {shown && (
         <>
           <div className="mb-4 grid gap-2 sm:grid-cols-3">
-            {MARKETPLACES.map((m) => {
+            {RIVAL_MARKETPLACES.map((m) => {
               const s = standing(shown, m);
               return (
                 <div
@@ -329,7 +329,7 @@ function GroupDialog({
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[34%]">Product</TableHead>
-                {MARKETPLACES.map((m) => (
+                {RIVAL_MARKETPLACES.map((m) => (
                   <TableHead key={m}>
                     <Where marketplace={m} className="inline-flex items-center gap-1.5" />
                   </TableHead>
@@ -357,7 +357,7 @@ function GroupDialog({
                       </span>
                     </div>
                   </TableCell>
-                  {MARKETPLACES.map((m) => (
+                  {RIVAL_MARKETPLACES.map((m) => (
                     <TableCell key={m} className="py-3">
                       <PriceCell
                         cell={row.cells[m]}
@@ -467,11 +467,11 @@ export default function CompetitorsView({
 
   const groups: Group[] = useMemo(() => buildGroups(rows, competitors), [rows, competitors]);
 
-  const shown: Marketplace[] = where === 'all' ? [...MARKETPLACES] : [where];
+  const shown: Marketplace[] = where === 'all' ? [...RIVAL_MARKETPLACES] : [where];
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const markets: readonly Marketplace[] = where === 'all' ? MARKETPLACES : [where];
+    const markets: readonly Marketplace[] = where === 'all' ? RIVAL_MARKETPLACES : [where];
     // The worst gap on the marketplaces in view, as a share of IMECO's price.
     const worst = (g: Group) =>
       Math.max(
@@ -502,7 +502,7 @@ export default function CompetitorsView({
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {MARKETPLACES.map((m) => (
+        {RIVAL_MARKETPLACES.map((m) => (
           <Scorecard
             key={m}
             marketplace={m}
@@ -540,7 +540,7 @@ export default function CompetitorsView({
               onChange={setWhere}
               options={[
                 ['all', 'All marketplaces'],
-                ...MARKETPLACES.map((m): [Marketplace, string] => [m, MARKETPLACE_LABELS[m]]),
+                ...RIVAL_MARKETPLACES.map((m): [Marketplace, string] => [m, MARKETPLACE_LABELS[m]]),
               ]}
             />
             <span className="hidden h-5 w-px bg-border sm:block" aria-hidden />

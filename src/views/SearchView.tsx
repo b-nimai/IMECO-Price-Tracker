@@ -17,7 +17,7 @@ import {
   type SearchResultRow,
 } from '@/data/supabaseClient';
 import { shareOfSearch } from '@/data/overview';
-import { MARKETPLACE_COLORS, MARKETPLACES, type Marketplace } from '@/data/types';
+import { MARKETPLACE_COLORS, SEARCH_MARKETPLACES, type Marketplace } from '@/data/types';
 import { isMissingView, useRemote } from '@/hooks/useRemote';
 import { cn } from '@/lib/utils';
 
@@ -322,7 +322,7 @@ function ResultsDialog({
       nav={listNav(keywords, keyword, onPick, 'keyword')}
     >
       <div className="grid h-full gap-px bg-border lg:grid-cols-3">
-        {MARKETPLACES.map((m) => (
+        {SEARCH_MARKETPLACES.map((m) => (
           <section key={m} className="flex min-h-0 min-w-0 flex-col bg-background">
             <div className="flex flex-none items-start justify-between gap-2 border-b border-border px-4 py-3">
               <Where
@@ -405,7 +405,7 @@ export default function SearchView() {
   const sorted = useMemo(() => {
     if (sort === 'az') return visible;
     const best = (k: string) =>
-      Math.min(999, ...MARKETPLACES.map((m) => rankOf(today.get(`${k}:${m}`))?.rank ?? 999));
+      Math.min(999, ...SEARCH_MARKETPLACES.map((m) => rankOf(today.get(`${k}:${m}`))?.rank ?? 999));
     return [...visible].sort((a, b) => (sort === 'best' ? 1 : -1) * (best(a) - best(b)));
   }, [visible, sort, today]);
 
@@ -434,7 +434,7 @@ export default function SearchView() {
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <div className="grid gap-3 md:grid-cols-3">
-        {MARKETPLACES.map((m) => (
+        {SEARCH_MARKETPLACES.map((m) => (
           <MarketCard key={m} marketplace={m} latest={today} results={latest?.data ?? []} />
         ))}
       </div>
@@ -488,7 +488,7 @@ export default function SearchView() {
                 )}
               >
                 <span className="pl-1">Keyword</span>
-                {MARKETPLACES.map((m) => (
+                {SEARCH_MARKETPLACES.map((m) => (
                   <Where
                     key={m}
                     marketplace={m}
@@ -512,7 +512,7 @@ export default function SearchView() {
                 <span className="truncate pl-1 text-sm font-medium text-foreground" title={k}>
                   {k}
                 </span>
-                {MARKETPLACES.map((m) => (
+                {SEARCH_MARKETPLACES.map((m) => (
                   <HeatCell
                     key={m}
                     today={today.get(`${k}:${m}`)}

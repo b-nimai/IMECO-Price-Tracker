@@ -37,6 +37,7 @@ function row(
       amazon: cell('amazon', amazon.price, amazon),
       flipkart: cell('flipkart', null),
       blinkit: cell('blinkit', null),
+      myntra: cell('myntra', null),
     },
   } as unknown as Row;
 }
