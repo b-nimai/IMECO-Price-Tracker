@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowUp, Trophy } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ArrowDown, ArrowUp, ExternalLink } from 'lucide-react';
+import { type ReactNode, useMemo, useState } from 'react';
 
 import { DeltaPill } from '@/components/charts/DeltaPill';
 import { Sparkline } from '@/components/charts/Sparkline';
@@ -80,47 +80,75 @@ function absence(cell: Cell, row: Row): { text: string; title: string; tone: str
   }
 }
 
+/**
+ * A price cell with a listing opens that listing on the marketplace, in a new tab. The click
+ * stops here, so it does not also open the row's trend chart — the rest of the row still does.
+ */
+function ListingLink({
+  url,
+  market,
+  title,
+  className,
+  children,
+}: {
+  url: string | null | undefined;
+  market: Marketplace;
+  title: string | undefined;
+  className?: string;
+  children: ReactNode;
+}) {
+  if (!url) {
+    return (
+      <div title={title} className={className}>
+        {children}
+      </div>
+    );
+  }
+  const open = `Open on ${MARKETPLACE_LABELS[market]}`;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title={[title, open].filter(Boolean).join(' · ')}
+      aria-label={open}
+      className={cn(
+        'group block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        className,
+      )}
+    >
+      {children}
+    </a>
+  );
+}
+
 function PriceCell({
   cell,
+  market,
   row,
-  best,
   yesterday,
 }: {
   cell: Cell;
+  market: Marketplace;
   row: Row;
-  best: boolean;
   yesterday: number | undefined;
 }) {
   const price = live(cell);
   if (price == null) {
     const a = absence(cell, row);
     const oosPrice = cell.status === 'out_of_stock' && cell.price != null;
-    const body = (
-      <span className={cn('flex flex-col gap-0.5', a.tone)}>
-        {oosPrice && (
-          <span className="text-sm text-muted-foreground line-through tabular-nums">
-            {formatPrice(cell.price!)}
-          </span>
-        )}
-        <span className="text-xs">{a.text}</span>
-      </span>
-    );
     return (
-      <div title={a.title}>
-        {cell.status === 'blocked' && cell.url ? (
-          <a
-            href={cell.url}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="hover:underline"
-          >
-            {body}
-          </a>
-        ) : (
-          body
-        )}
-      </div>
+      <ListingLink url={cell.url} market={market} title={a.title}>
+        <span className={cn('flex flex-col gap-0.5', a.tone, cell.url && 'group-hover:underline')}>
+          {oosPrice && (
+            <span className="text-sm text-muted-foreground line-through tabular-nums">
+              {formatPrice(cell.price!)}
+            </span>
+          )}
+          <span className="text-xs">{a.text}</span>
+        </span>
+      </ListingLink>
     );
   }
   const off = discount(cell, row);
@@ -135,13 +163,17 @@ function PriceCell({
           ? `At TSP ${formatPrice(row.tsp!)}`
           : null;
   return (
-    <div
-      className={cn(
-        '-mx-2 flex flex-col gap-0.5 rounded-lg px-2 py-1',
-        standing === 'below' && 'bg-rose-500/10 ring-1 ring-rose-500/40',
-        (standing === 'at' || standing === 'above') && 'bg-emerald-500/10 ring-1 ring-emerald-500/40',
-      )}
+    <ListingLink
+      url={cell.url}
+      market={market}
       title={[vsTsp, cell.note, cell.unit].filter(Boolean).join(' · ') || undefined}
+      className={cn(
+        '-mx-2 flex flex-col gap-0.5 rounded-lg px-2 py-1 transition-colors',
+        standing === 'below' && 'bg-rose-500/10 ring-1 ring-rose-500/40 hover:bg-rose-500/20',
+        (standing === 'at' || standing === 'above') &&
+          'bg-emerald-500/10 ring-1 ring-emerald-500/40 hover:bg-emerald-500/20',
+        standing == null && cell.url && 'hover:bg-muted/60',
+      )}
     >
       <span className="flex items-center gap-1.5">
         <span className="text-base font-semibold text-foreground tabular-nums">
@@ -149,15 +181,20 @@ function PriceCell({
         </span>
         {standing === 'below' && <ArrowDown className="size-4 text-bad" aria-label={vsTsp!} />}
         {standing === 'above' && <ArrowUp className="size-4 text-good" aria-label={vsTsp!} />}
-        {best && <Trophy className="size-3 text-good" aria-label="Cheapest" />}
         {change != null && <DeltaPill delta={change} format={(v) => formatPct(v)} good="neutral" />}
+        {cell.url && (
+          <ExternalLink
+            className="ml-auto size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+            aria-hidden
+          />
+        )}
       </span>
       {off != null && off > 0.005 && (
         <span className="text-[11px] text-muted-foreground tabular-nums">
           {formatPct(off)} off MRP
         </span>
       )}
-    </div>
+    </ListingLink>
   );
 }
 
@@ -279,9 +316,6 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
               <span className="inline-flex items-center gap-1">
                 <ArrowUp className="size-3 text-good" aria-hidden /> above TSP
               </span>
-              <span className="inline-flex items-center gap-1">
-                <Trophy className="size-3 text-good" aria-hidden /> cheapest marketplace
-              </span>
             </span>
             <FilterBox value={filter} onChange={setFilter} />
           </div>
@@ -308,7 +342,6 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
             </thead>
             <tbody>
               {visible.map((row) => {
-                const best = cheapest(row);
                 const spark = MARKETPLACES.map((m) => ({
                   values: history.series.get(`${row.sku}:${m}`) ?? [],
                   color: MARKETPLACE_COLORS[m],
@@ -350,8 +383,8 @@ export default function PricesView({ rows, showUnlisted }: { rows: Row[]; showUn
                       <td key={m} className="px-4 py-2">
                         <PriceCell
                           cell={row.cells[m]}
+                          market={m}
                           row={row}
-                          best={best === m}
                           yesterday={history.yesterday.get(`${row.sku}:${m}`)}
                         />
                       </td>
