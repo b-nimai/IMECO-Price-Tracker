@@ -27,6 +27,10 @@ TIMEOUT = 60.0
 #: catalogue upsert is chunked anyway so this does not become a limit later.
 CHUNK = 250
 
+#: SKUs per `sku=in.(...)` filter. They travel in the URL, and competitor keys run to ~40
+#: characters, so this keeps each request a few KB.
+DEMOTE_CHUNK = 80
+
 
 class Store:
     def __init__(self, settings: Settings) -> None:
@@ -138,16 +142,44 @@ class Store:
         """
         if not skus:
             return
-        in_list = ",".join(f'"{s}"' for s in skus)
-        response = self._client.patch(
-            f"{self._base}/products",
-            params={"sku": f"not.in.({in_list})", "position": "not.is.null"},
-            json={"position": None},
-        )
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"products reorder failed [{response.status_code}]: {response.text[:300]}"
+        # Read the positioned SKUs and patch only the stale ones, in batches. The obvious single
+        # `sku=not.in.(<every SKU in the sheet>)` filter puts the whole catalogue in the URL:
+        # with competitors that is ~700 keys and ~22 KB, and the gateway answers 400 with an
+        # empty body — failing the run before a single price is stored.
+        keep = set(skus)
+        positioned: list[str] = []
+        while True:
+            response = self._client.get(
+                f"{self._base}/products",
+                params={
+                    "select": "sku",
+                    "position": "not.is.null",
+                    "order": "sku",
+                    "offset": len(positioned),
+                    "limit": 1000,
+                },
             )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"products read failed [{response.status_code}]: {response.text[:300]}"
+                )
+            page = [row["sku"] for row in response.json()]
+            positioned += page
+            if len(page) < 1000:
+                break
+
+        stale = [s for s in positioned if s not in keep]
+        for i in range(0, len(stale), DEMOTE_CHUNK):
+            in_list = ",".join(f'"{s}"' for s in stale[i : i + DEMOTE_CHUNK])
+            response = self._client.patch(
+                f"{self._base}/products",
+                params={"sku": f"in.({in_list})"},
+                json={"position": None},
+            )
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"products reorder failed [{response.status_code}]: {response.text[:300]}"
+                )
 
     # ── runs ────────────────────────────────────────────────────────────────────────────
 
