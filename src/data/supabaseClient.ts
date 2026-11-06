@@ -37,6 +37,19 @@ async function get<T>(path: string, label: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** PostgREST answers at most 1,000 rows per request; 90 days of one product is ~6.5k. */
+const PAGE = 1000;
+
+/** Every row of a query, a page at a time. `path` must carry a stable `order`. */
+async function getAll<T>(path: string, label: string): Promise<T[]> {
+  const rows: T[] = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const page = await get<T[]>(`${path}&limit=${PAGE}&offset=${offset}`, label);
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+}
+
 /**
  * Fallback for when Supabase is not configured: a real scrape captured to a static file by
  * `python -m desktop.run --fixture public/demo-prices.json`.
@@ -72,14 +85,14 @@ const PRODUCT_COLS = 'sku,name,mrp,starred,target_sp,urls';
  */
 async function fetchProducts(): Promise<ProductRow[]> {
   const attempts = [
-    `${PRODUCT_COLS},position,brand,competitor_of,tsp&order=position.asc.nullslast`,
-    `${PRODUCT_COLS},position,brand,competitor_of&order=position.asc.nullslast`,
-    `${PRODUCT_COLS},position&order=position.asc.nullslast`,
-    PRODUCT_COLS,
+    `${PRODUCT_COLS},position,brand,competitor_of,tsp&order=position.asc.nullslast,sku.asc`,
+    `${PRODUCT_COLS},position,brand,competitor_of&order=position.asc.nullslast,sku.asc`,
+    `${PRODUCT_COLS},position&order=position.asc.nullslast,sku.asc`,
+    `${PRODUCT_COLS}&order=sku.asc`,
   ];
   for (const [i, cols] of attempts.entries()) {
     try {
-      return await get<ProductRow[]>(`products?select=${cols}`, 'products');
+      return await getAll<ProductRow>(`products?select=${cols}`, 'products');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const missing = /\btsp\b|position|brand|competitor_of/.exec(message)?.[0];
@@ -93,8 +106,12 @@ async function fetchProducts(): Promise<ProductRow[]> {
 export async function fetchPrices(): Promise<Omit<CachedPayload, 'fetchedAt'>> {
   const [products, snapshots, runs] = await Promise.all([
     fetchProducts(),
-    get<SnapshotRow[]>(
-      'latest_prices?select=sku,marketplace,price,mrp,unit,status,via,note,checked_at',
+    // Paged: with competitors this is ~2,750 rows, and PostgREST stops at 1,000. Competitor
+    // keys ("C:…") sort before IMECO's, so an unpaged read returned only competitors and every
+    // IMECO cell sat at "Awaiting check".
+    getAll<SnapshotRow>(
+      'latest_prices?select=sku,marketplace,price,mrp,unit,status,via,note,checked_at' +
+        '&order=sku.asc,marketplace.asc',
       'latest_prices',
     ),
     // Only finished runs. An in-flight run is half-written, and reading it would show a
@@ -107,8 +124,9 @@ export async function fetchPrices(): Promise<Omit<CachedPayload, 'fetchedAt'>> {
 
   let previous: SnapshotRow[] = [];
   if (runs.length > 1) {
-    previous = await get<SnapshotRow[]>(
-      `price_snapshots?select=sku,marketplace,price,mrp,unit,status,via,note,checked_at&run_id=eq.${runs[1].id}`,
+    previous = await getAll<SnapshotRow>(
+      `price_snapshots?select=sku,marketplace,price,mrp,unit,status,via,note,checked_at&run_id=eq.${runs[1].id}` +
+        '&order=id.asc',
       'previous run',
     );
   }
@@ -125,19 +143,6 @@ export interface HistoryRow {
   price: number | null;
   status: string;
   checked_at: string;
-}
-
-/** PostgREST answers at most 1,000 rows per request; 90 days of one product is ~6.5k. */
-const PAGE = 1000;
-
-/** Every row of a query, a page at a time. `path` must carry a stable `order`. */
-async function getAll<T>(path: string, label: string): Promise<T[]> {
-  const rows: T[] = [];
-  for (let offset = 0; ; offset += PAGE) {
-    const page = await get<T[]>(`${path}&limit=${PAGE}&offset=${offset}`, label);
-    rows.push(...page);
-    if (page.length < PAGE) return rows;
-  }
 }
 
 /** Every reading of one product over the last `days`, oldest first. */
@@ -164,8 +169,9 @@ export interface PriceStatsRow {
 
 /** Lows, highs and change counts per listing — the `price_stats` view in supabase/schema.sql. */
 export async function fetchPriceStats(): Promise<PriceStatsRow[]> {
-  return get<PriceStatsRow[]>(
-    'price_stats?select=sku,marketplace,min_ever,max_ever,min_30d,max_30d,changes_30d,first_seen',
+  return getAll<PriceStatsRow>(
+    'price_stats?select=sku,marketplace,min_ever,max_ever,min_30d,max_30d,changes_30d,first_seen' +
+      '&order=sku.asc,marketplace.asc',
     'price_stats',
   );
 }
@@ -210,8 +216,9 @@ export interface AvailabilityRow {
 }
 
 export async function fetchAvailability(): Promise<AvailabilityRow[]> {
-  return get<AvailabilityRow[]>(
-    'availability_stats?select=sku,marketplace,status_now,checks_7d,in_stock_7d,checks_30d,in_stock_30d,status_since,unchanged_30d',
+  return getAll<AvailabilityRow>(
+    'availability_stats?select=sku,marketplace,status_now,checks_7d,in_stock_7d,checks_30d,in_stock_30d,status_since,unchanged_30d' +
+      '&order=sku.asc,marketplace.asc',
     'availability_stats',
   );
 }
@@ -229,8 +236,9 @@ export interface StoreRow {
 
 /** Each Blinkit dark store's latest answer per listing — the `blinkit_store_stats` view. */
 export async function fetchBlinkitStores(): Promise<StoreRow[]> {
-  return get<StoreRow[]>(
-    'blinkit_store_stats?select=sku,area,city,status_now,price_now,checked_at,checks_7d,in_stock_7d',
+  return getAll<StoreRow>(
+    'blinkit_store_stats?select=sku,area,city,status_now,price_now,checked_at,checks_7d,in_stock_7d' +
+      '&order=sku.asc,area.asc',
     'blinkit_store_stats',
   );
 }
@@ -248,8 +256,9 @@ export interface RatingRow {
 }
 
 export async function fetchRatings(): Promise<RatingRow[]> {
-  return get<RatingRow[]>(
-    'rating_trend?select=sku,marketplace,rating,rating_count,checked_at,rating_then,count_then,then_at',
+  return getAll<RatingRow>(
+    'rating_trend?select=sku,marketplace,rating,rating_count,checked_at,rating_then,count_then,then_at' +
+      '&order=sku.asc,marketplace.asc',
     'rating_trend',
   );
 }
