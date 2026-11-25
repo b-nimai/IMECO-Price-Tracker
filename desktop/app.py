@@ -250,6 +250,10 @@ class App:
 
             ok = sum(c.status is Status.OK for _, c in report.results)
             self.events.put(("done", ok, len(report.results), len(report.problems)))
+        except catalogue.NoSheetError as exc:
+            # Stopped before anything was written. Ask for the sheet rather than just failing.
+            self.events.put(("error", "No pricing sheet — upload it to run"))
+            self.events.put(("fetch_failed", str(exc)))
         except Exception as exc:  # surfaced in the window rather than a silent death
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 

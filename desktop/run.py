@@ -31,7 +31,7 @@ import httpx
 
 from . import meesho
 from .adapters import PARSERS
-from .catalogue import USER_WORKBOOK, refresh_catalogue
+from .catalogue import USER_WORKBOOK, NoSheetError, refresh_catalogue
 from .config import Settings, load_settings
 from .fetch import BLINKIT_LOCATIONS, Fetcher
 from .models import (
@@ -602,7 +602,11 @@ def main(argv: list[str] | None = None) -> int:
     settings = load_settings()
     # The Google Sheet, fresh — so an edit there reaches the next hourly run with nobody
     # uploading anything. Falls back to the last good copy when Google cannot be reached.
-    products, changed, problem = refresh_catalogue()
+    try:
+        products, changed, problem = refresh_catalogue()
+    except NoSheetError as exc:
+        print(f"  ! {exc}")
+        return 1
     started = time.monotonic()
 
     if problem:

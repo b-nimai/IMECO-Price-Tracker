@@ -214,16 +214,30 @@ def _fetch_google_sheet(sheet_id: str | None) -> tuple[list[Product], bool]:
     return products, changed
 
 
+class NoSheetError(RuntimeError):
+    """The Google Sheet could not be fetched and no copy of it was ever fetched or uploaded."""
+
+
 def refresh_catalogue() -> tuple[list[Product], bool, str | None]:
     """The catalogue for a run: fresh from Google when possible, else the last good copy.
 
-    (products, whether the sheet changed, a warning when Google could not be used). Raises only
-    when there is no usable sheet at all.
+    (products, whether the sheet changed, a warning when Google could not be used).
+
+    NEVER falls back to the sheet built into the app. That copy is frozen at build time — 42
+    products, no TSP, no Myntra or Meesho links — and a run syncs whatever it reads into the
+    live catalogue. On 25 Nov 2026 an exe opened fresh on another PC, unable to reach Google,
+    did exactly that: the wall lost 80 products, every TSP and two marketplaces' links. So with
+    no fetched or uploaded copy, this raises NoSheetError and the run stops before writing.
     """
     try:
         products, changed = fetch_google_sheet()
         return products, changed, None
     except Exception as exc:  # noqa: BLE001 — offline, unshared, or a half-edited sheet
+        if active_workbook() != USER_WORKBOOK:
+            raise NoSheetError(
+                f"the pricing Google Sheet could not be fetched ({exc}) and no copy has been "
+                "uploaded — open Spreadsheet and upload it. Nothing was changed."
+            ) from exc
         _, _, stamp = workbook_status()
         return load_products(), False, f"Google Sheet not fetched ({exc}) — using the {stamp} copy"
 
