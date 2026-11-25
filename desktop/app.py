@@ -21,11 +21,14 @@ import sys
 import threading
 import time
 import tkinter as tk
+from datetime import datetime, timedelta
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import catalogue, schedule
-from .catalogue import load_products
+import webbrowser
+
+from . import catalogue, meesho, schedule
+from .catalogue import load_products, refresh_catalogue
 from .config import load_settings, save_setting
 from .models import MARKETPLACES, Product, Status
 from .run import execute_run
@@ -136,8 +139,13 @@ class App:
             relief="flat", padx=18, pady=6, cursor="hand2",
         ).pack(side="left", padx=6)
 
+        #: A warning raised during a run, shown when it finishes (see _drain).
+        self.notice: str | None = None
         self.refresh_status()
         self.root.after(100, self._drain)
+        # Fetch the Google Sheet as soon as the window opens, so the status line — and, if the
+        # sheet changed, the dashboard's product list — are current before anyone presses Run.
+        self.root.after(200, self.fetch_sheet)
 
         if load_settings().missing():
             self.root.after(400, self.open_settings)
@@ -172,9 +180,18 @@ class App:
         # Nothing else notices: the runs all succeed, exit 0, and report no errors. So the one
         # place it can be caught is here, and it has to be loud enough to read as a problem.
         _, operator, stamp = catalogue.workbook_status()
+        if catalogue.fetch_problem():
+            using = f"using the copy {stamp}" if stamp.startswith("uploaded") else "upload it in Spreadsheet"
+            bits.append(f"sheet: Google Sheet NOT FETCHING — {using}")
+            self.status.config(text="   ".join(bits), fg=WARN)
+            return
         if operator:
-            bits.append(f"sheet: yours ({stamp})")
-            self.status.config(text="   ".join(bits), fg=MUTED)
+            # A fetch that keeps failing (the sheet unshared, the PC offline) leaves runs on an
+            # ever older copy, so a stale date is a warning too.
+            fetched = catalogue.last_fetched()
+            stale = fetched is not None and datetime.now() - fetched > timedelta(hours=3)
+            bits.append(f"sheet: {stamp}" + (" — NOT UPDATING" if stale else ""))
+            self.status.config(text="   ".join(bits), fg=WARN if stale else MUTED)
             return
 
         bits.append(f"sheet: BUILT-IN, not yours ({stamp})")
@@ -210,7 +227,10 @@ class App:
     def _work(self, source: str) -> None:
         try:
             settings = load_settings()
-            products = load_products()
+            self.events.put(("phase", "Fetching the pricing Google Sheet", False))
+            products, _, problem = refresh_catalogue()
+            if problem:
+                self.events.put(("warning", "Google Sheet not fetched — upload it in Spreadsheet"))
 
             def progress(marketplace: str, done: int, total: int) -> None:
                 self.events.put(("progress", marketplace, done, total))
@@ -234,6 +254,73 @@ class App:
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
     # ── the catalogue ───────────────────────────────────────────────────────────────────
+
+    def fetch_sheet(self) -> None:
+        """Download the pricing Google Sheet now, in the background.
+
+        When it changed, the new product list goes to the dashboard straight away (prices
+        follow on the next run). When Google cannot be reached the last good copy stays in
+        force and the status line says how old it is.
+        """
+
+        def work() -> None:
+            try:
+                products, changed = catalogue.fetch_google_sheet()
+            except Exception as exc:  # noqa: BLE001 — offline, unshared, half-edited
+                self.events.put(("fetch_failed", str(exc)))
+                return
+            if changed:
+                self.push_catalogue(products)
+                self.events.put(("sheet", f"Pricing sheet updated from Google — {len(products)} items", True))
+            else:
+                self.events.put(("sheet", "Pricing sheet is up to date with Google", True))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def offer_upload(self, reason: str) -> None:
+        """The fetch failed: say so, and offer the upload that keeps the products current."""
+        if messagebox.askyesno(
+            "Could not fetch the pricing sheet",
+            f"The pricing Google Sheet could not be downloaded:\n\n{reason}\n\n"
+            "Runs carry on with the last copy, so new products or links will be missing until "
+            "the sheet is fetched or uploaded.\n\nUpload the latest sheet (.xlsx) now?",
+        ):
+            self.upload_sheet()
+
+    def upload_sheet(self, parent: tk.Misc | None = None) -> bool:
+        """Install a workbook from disk — the fallback for when the Google Sheet cannot be
+        fetched. The next fetch that works replaces it, so the Google Sheet stays the source."""
+        parent = parent or self.root
+        selected = filedialog.askopenfilename(
+            parent=parent,
+            title="Choose the pricing spreadsheet",
+            filetypes=[("Excel workbook", "*.xlsx *.xlsm"), ("All files", "*.*")],
+        )
+        if not selected:
+            return False  # cancelled — the current sheet stays in force
+        try:
+            # Parses before it copies. A sheet that cannot be read must never become the one
+            # 24 unattended runs a day depend on.
+            products = catalogue.install_workbook(Path(selected))
+        except Exception as exc:
+            messagebox.showerror(
+                "That sheet was not accepted",
+                f"{type(exc).__name__}: {exc}\n\n"
+                "The previous spreadsheet is still in use — nothing was changed.",
+                parent=parent,
+            )
+            return False
+        # Names, row order and which SKUs exist go to the dashboard straight away; the PRICES
+        # still need a scrape, which is the distinction the message draws.
+        self.push_catalogue(products)
+        messagebox.showinfo(
+            "Spreadsheet updated",
+            f"{catalogue.summarise_catalogue(products)}\n\n"
+            "The dashboard's product list and order update now. Prices follow on the next run.",
+            parent=parent,
+        )
+        self.refresh_status()
+        return True
 
     def push_catalogue(self, products: list[Product] | None = None) -> None:
         """Mirror the sheet now in force into Supabase, without waiting for a scrape.
@@ -259,7 +346,9 @@ class App:
                 from .store import Store
 
                 with Store(settings) as store:
-                    store.sync_products(items)
+                    # With the Meesho links, or this push would strip them from the dashboard
+                    # until the next run puts them back.
+                    store.sync_products(items, meesho.links_or_none(items))
                 self.events.put(("catalogue", f"Dashboard updated — {len(items)} products", True))
             except Exception as exc:
                 # The sheet itself IS installed at this point, and the next run will sync it.
@@ -299,7 +388,10 @@ class App:
                     self.counts["saving"] = (done, total)
                 elif event[0] == "done":
                     _, ok, total, problems = event
-                    if problems:
+                    if self.notice:
+                        self.subtitle.config(text=f"Done — {ok} prices saved. {self.notice}"[:90], fg=WARN)
+                        self.notice = None
+                    elif problems:
                         self.subtitle.config(
                             text=f"Done — {ok} prices saved; {problems} search problems, "
                             "see last-search.txt",
@@ -311,6 +403,18 @@ class App:
                 elif event[0] == "error":
                     self.subtitle.config(text=event[1][:70], fg=DANGER)
                     self._finish()
+                elif event[0] == "warning":
+                    # Mid-run the heartbeat owns the subtitle, so this waits for "done".
+                    self.notice = event[1]
+                elif event[0] == "fetch_failed":
+                    self.refresh_status()
+                    if not self.running:
+                        self.subtitle.config(text="Google Sheet not fetched — last copy in use", fg=WARN)
+                        self.offer_upload(event[1])
+                elif event[0] == "sheet":
+                    self.refresh_status()
+                    if not self.running:
+                        self.subtitle.config(text=event[1][:90], fg=ACCENT if event[2] else WARN)
                 elif event[0] == "catalogue":
                     # A run's own progress outranks this — the catalogue push is a background
                     # courtesy, and it must not overwrite the line someone is watching.
@@ -421,14 +525,14 @@ class App:
     # ── the spreadsheet ─────────────────────────────────────────────────────────────────
 
     def open_workbook_dialog(self) -> None:
-        """Let the operator swap in a new pricing sheet — or carry on with the current one.
+        """Which pricing sheet is in force: fetch it now, open it to edit, or upload a file.
 
-        Doing nothing is a first-class outcome here, which is why this is a dialog rather than
-        a bare file picker: the common case is that the sheet has NOT changed and the operator
-        just wants to see which one is in force. Nothing is touched unless they choose a file
-        and that file parses.
+        The Google Sheet is fetched at the start of every run, so an edit there is picked up on
+        its own. Uploading is the fallback for when that fetch fails — and the next fetch that
+        works replaces the upload, so the Google Sheet stays the one source.
         """
-        path, operator, stamp = catalogue.workbook_status()
+        problem = catalogue.fetch_problem()
+        path, fetched, stamp = catalogue.workbook_status()
         try:
             summary = catalogue.summarise_catalogue(load_products())
         except Exception as exc:
@@ -437,7 +541,7 @@ class App:
         window = tk.Toplevel(self.root)
         window.title("Pricing spreadsheet")
         window.configure(bg=BG)
-        window.geometry("560x300")
+        window.geometry("600x320" if problem else "600x280")
         window.resizable(False, False)
         window.transient(self.root)
         window.grab_set()
@@ -450,91 +554,58 @@ class App:
         body.pack(fill="x", padx=24)
         tk.Label(
             body,
-            text=f"In use:  {'your uploaded sheet' if operator else 'the sheet built into this app'}",
-            bg=BG, fg=FG, font=("Segoe UI", 9), anchor="w",
+            text=f"In use:  {stamp}",
+            bg=BG, fg=FG if fetched else WARN, font=("Segoe UI", 9), anchor="w",
         ).pack(fill="x")
-        tk.Label(
-            body, text=stamp, bg=BG, fg=MUTED, font=("Consolas", 9), anchor="w"
-        ).pack(fill="x", pady=(2, 0))
         tk.Label(
             body, text=summary, bg=BG, fg=MUTED, font=("Consolas", 9),
             anchor="w", wraplength=500, justify="left",
         ).pack(fill="x", pady=(2, 0))
-        tk.Label(
-            body, text=str(path), bg=BG, fg=MUTED, font=("Consolas", 8),
-            anchor="w", wraplength=500, justify="left",
-        ).pack(fill="x", pady=(8, 0))
+
+        if problem:
+            tk.Label(
+                body,
+                text=f"The Google Sheet could not be fetched: {problem}\n"
+                     "Upload the latest sheet until it can.",
+                bg=BG, fg=WARN, font=("Segoe UI", 9), anchor="w", wraplength=540, justify="left",
+            ).pack(fill="x", pady=(8, 0))
 
         tk.Label(
             window,
-            text="Prices and links come from this sheet on every run, including the automatic\n"
-                 "hourly ones. Leave it alone and nothing changes.",
+            text="Edit the Google Sheet and the next run picks it up on its own, including the\n"
+                 "automatic hourly ones. Upload only when the sheet cannot be fetched.",
             bg=BG, fg=MUTED, font=("Segoe UI", 8), justify="left",
         ).pack(pady=(12, 0), padx=24, anchor="w")
 
         row = tk.Frame(window, bg=BG)
         row.pack(pady=16)
 
-        def choose() -> None:
-            selected = filedialog.askopenfilename(
-                parent=window,
-                title="Choose the new pricing spreadsheet",
-                filetypes=[("Excel workbook", "*.xlsx *.xlsm"), ("All files", "*.*")],
-            )
-            if not selected:
-                return  # cancelled — the current sheet stays in force
-            try:
-                # Parses before it copies. A sheet that cannot be read must never become the
-                # one 24 unattended runs a day depend on.
-                products = catalogue.install_workbook(Path(selected))
-            except Exception as exc:
-                messagebox.showerror(
-                    "That sheet was not accepted",
-                    f"{type(exc).__name__}: {exc}\n\n"
-                    "The previous spreadsheet is still in use — nothing was changed.",
-                    parent=window,
-                )
-                return
-            # Names, row order and which SKUs exist go to the dashboard straight away; the
-            # PRICES still need a scrape, which is the distinction the message draws.
-            self.push_catalogue(products)
-            messagebox.showinfo(
-                "Spreadsheet updated",
-                f"{catalogue.summarise_catalogue(products)}\n\n"
-                "The dashboard's product list and order update now. Prices follow on the next "
-                "run — manual or automatic.",
-                parent=window,
-            )
+        def fetch_now() -> None:
             window.destroy()
-            self.refresh_status()
-
-        def revert() -> None:
-            if not messagebox.askyesno(
-                "Use the built-in sheet?",
-                "Discard the spreadsheet you uploaded and go back to the one that shipped "
-                "with this app?",
-                parent=window,
-            ):
-                return
-            catalogue.revert_workbook()
-            # The built-in sheet is usually SMALLER, so this path removes products as well as
-            # renaming them. Pushing it immediately is what makes the board agree with the
-            # sheet that is actually in force from this moment on.
-            self.push_catalogue()
-            window.destroy()
-            self.refresh_status()
+            self.subtitle.config(text="Fetching the pricing Google Sheet...", fg=MUTED)
+            self.fetch_sheet()
 
         tk.Button(
-            row, text="Update spreadsheet...", command=choose, bg=ACCENT, fg="#000000",
+            row, text="Fetch now", command=fetch_now, bg=ACCENT, fg="#000000",
             font=("Segoe UI", 10, "bold"), relief="flat", padx=18, pady=6, cursor="hand2",
         ).pack(side="left", padx=6)
-        if operator:
-            tk.Button(
-                row, text="Use built-in", command=revert, bg="#1a1a1a", fg=FG,
-                font=("Segoe UI", 10), relief="flat", padx=14, pady=6, cursor="hand2",
-            ).pack(side="left", padx=6)
+        def upload() -> None:
+            if self.upload_sheet(window):
+                window.destroy()
+
         tk.Button(
-            row, text="Keep current", command=window.destroy, bg="#1a1a1a", fg=FG,
+            row, text="Upload file...", command=upload,
+            bg=WARN if problem else "#1a1a1a", fg="#000000" if problem else FG,
+            font=("Segoe UI", 10), relief="flat", padx=14, pady=6, cursor="hand2",
+        ).pack(side="left", padx=6)
+        tk.Button(
+            row, text="Open sheet",
+            command=lambda: webbrowser.open(catalogue.GOOGLE_EDIT.format(id=catalogue.GOOGLE_SHEET_ID)),
+            bg="#1a1a1a", fg=FG, font=("Segoe UI", 10), relief="flat", padx=14, pady=6,
+            cursor="hand2",
+        ).pack(side="left", padx=6)
+        tk.Button(
+            row, text="Close", command=window.destroy, bg="#1a1a1a", fg=FG,
             font=("Segoe UI", 10), relief="flat", padx=14, pady=6, cursor="hand2",
         ).pack(side="left", padx=6)
 

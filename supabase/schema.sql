@@ -59,7 +59,7 @@ create table if not exists price_snapshots (
   run_id      uuid not null references runs(id) on delete cascade,
   sku         text not null references products(sku) on delete cascade,
   marketplace text not null
-                check (marketplace in ('amazon','flipkart','myntra','blinkit')),
+                check (marketplace in ('amazon','flipkart','myntra','blinkit','meesho')),
 
   -- NULL unless status is 'ok' or 'out_of_stock'. An OOS listing keeps its price because the
   -- number is still true — it is what the item costs when stock returns.
@@ -72,7 +72,7 @@ create table if not exists price_snapshots (
   status      text not null
                 check (status in ('ok','not_listed','out_of_stock','blocked','error')),
   via         text not null default 'direct'
-                check (via in ('direct','brightdata','none')),
+                check (via in ('direct','brightdata','none','sheet')),
   note        text,          -- why, for any non-ok status. Shown in the dashboard tooltip.
   checked_at  timestamptz not null default now(),
 
@@ -94,6 +94,27 @@ alter table price_snapshots add column if not exists rating numeric
   check (rating is null or (rating > 0 and rating <= 5));
 alter table price_snapshots add column if not exists rating_count integer
   check (rating_count is null or rating_count >= 0);
+
+-- MIGRATION: Meesho prices, read from the "Meesho Product Sheet" Google Sheet by
+-- desktop/meesho.py — never scraped. Saved only when a price or stock state changes, so these
+-- rows are sparse by design; the dashboard carries each one forward until the next change.
+-- Safe to run more than once. Also in supabase/migration-meesho.sql.
+-- Drops the old marketplace / via checks whatever they were named, then adds the wider ones.
+do $$
+declare c record;
+begin
+  for c in
+    select conname from pg_constraint
+    where conrelid = 'price_snapshots'::regclass and contype = 'c'
+      and (pg_get_constraintdef(oid) ~ '\mmarketplace\M' or pg_get_constraintdef(oid) ~ '\mvia\M')
+  loop
+    execute format('alter table price_snapshots drop constraint %I', c.conname);
+  end loop;
+end $$;
+alter table price_snapshots add constraint price_snapshots_marketplace_check
+  check (marketplace in ('amazon','flipkart','myntra','blinkit','meesho'));
+alter table price_snapshots add constraint price_snapshots_via_check
+  check (via in ('direct','brightdata','none','sheet'));
 
 -- Every Blinkit dark store's answer for every listing, from the full walk the desktop app does
 -- every few hours (run.ALL_STORES_EVERY_HOURS). The board's cell answers "is it live anywhere";

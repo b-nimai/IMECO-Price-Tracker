@@ -69,7 +69,9 @@ class Store:
 
     # ── catalogue ───────────────────────────────────────────────────────────────────────
 
-    def sync_products(self, products: list[Product]) -> set[str]:
+    def sync_products(
+        self, products: list[Product], extra_urls: dict[str, dict[str, str]] | None = None
+    ) -> set[str]:
         """Mirror the spreadsheet into `products`. Upsert, so re-running is harmless.
 
         `position` carries the sheet's row order through to the dashboard, which sorts on it;
@@ -79,6 +81,8 @@ class Store:
         competitors at all: a competitor written to a table that cannot say it is one would land
         on the wall display as an IMECO product. An un-migrated database should lose features,
         not the scrape, and never gain a wrong row.
+
+        `extra_urls` adds links the sheet does not carry — Meesho's, from meesho.urls_for.
 
         Returns the SKUs actually stored, so the caller writes snapshots only for those — a
         snapshot for a product that is not in the table would fail the whole run on its
@@ -92,7 +96,7 @@ class Store:
                 "starred": p.starred,
                 "position": p.position,
                 "target_sp": p.target_sp,
-                "urls": p.urls,
+                "urls": {**p.urls, **(extra_urls or {}).get(p.sku, {})},
                 "brand": p.brand,
                 "competitor_of": p.competitor_of,
                 "tsp": p.tsp,
@@ -241,6 +245,23 @@ class Store:
                 self._post("price_snapshots", chunk)
             written += len(chunk)
         return written
+
+    def latest_for(self, marketplace: str) -> dict[str, tuple[float | None, str]]:
+        """sku -> (price, status) of the newest stored reading on one marketplace.
+
+        What the change-only Meesho step compares against (see meesho.changed)."""
+        response = self._client.get(
+            f"{self._base}/latest_prices",
+            params={"select": "sku,price,status", "marketplace": f"eq.{marketplace}", "limit": 5000},
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"latest_prices read failed [{response.status_code}]: {response.text[:300]}"
+            )
+        return {
+            r["sku"]: (float(r["price"]) if r["price"] is not None else None, r["status"])
+            for r in response.json()
+        }
 
     def save_availability(self, run_id: str, checks: list[LocationCheck]) -> int:
         """Every Blinkit dark store's answer for every listing — the Availability tab's data.

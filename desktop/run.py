@@ -29,8 +29,9 @@ from pathlib import Path
 
 import httpx
 
+from . import meesho
 from .adapters import PARSERS
-from .catalogue import USER_WORKBOOK, load_products
+from .catalogue import USER_WORKBOOK, refresh_catalogue
 from .config import Settings, load_settings
 from .fetch import BLINKIT_LOCATIONS, Fetcher
 from .models import (
@@ -354,6 +355,9 @@ class RunReport:
     warnings: list[str] = field(default_factory=list)
     run_id: str | None = None
     stored: int = 0
+    #: Our products found on the Meesho sheet, and how many of those changed and were saved.
+    meesho_matched: int = 0
+    meesho_saved: int = 0
 
 
 def execute_run(
@@ -404,8 +408,10 @@ def execute_run(
         fetcher = stack.enter_context(Fetcher(settings))
         store = None if dry_run else stack.enter_context(Store(settings))
         stored: set[str] = set()
+        listings = read_meesho(report)
         if store:
-            stored = store.sync_products(products)
+            links = meesho.urls_for(products, listings) if listings is not None else None
+            stored = store.sync_products(products, links)
             if len(stored) < len(products):
                 report.warnings.append("competitors not stored — run supabase/schema.sql")
             report.run_id = store.start_run(source)
@@ -420,6 +426,9 @@ def execute_run(
         report.results += first
         phase("Saving IMECO prices", False)
         save(first)
+        phase("Saving Meesho price changes", False)
+        if listings is not None:
+            sync_meesho(store, products, stored, report, listings)
         stage_saved()
 
         if rivals or walk_only:
@@ -457,6 +466,35 @@ def execute_run(
         if store and report.run_id:
             store.finish_run(report.run_id, [c for _, c in report.results])
     return report
+
+
+def read_meesho(report: RunReport) -> dict[str, meesho.Listing] | None:
+    """The Meesho sheet, or None (and a warning) when it cannot be read — never a failed run."""
+    try:
+        return meesho.fetch_listings()
+    except Exception as exc:  # noqa: BLE001 — unshared, offline, or a renamed header
+        report.warnings.append(f"Meesho sheet not read ({exc})")
+        return None
+
+
+def sync_meesho(
+    store, products: list[Product], stored: set[str], report: RunReport, listings
+) -> None:
+    """Save the Meesho prices that CHANGED since the last stored reading (see meesho.py).
+
+    A database without the Meesho migration is a warning. It must never cost the run the
+    prices already scraped.
+    """
+    try:
+        latest = store.latest_for(meesho.MARKETPLACE) if store else {}
+        listed = {sku for sku, (_, status) in latest.items() if status != "not_listed"}
+        cells = meesho.cells_for(products, listings, listed)
+        report.meesho_matched = sum(c.status is not Status.NOT_LISTED for _, c in cells)
+        due = [(sku, c) for sku, c in meesho.changed(cells, latest) if sku in stored]
+        if store and report.run_id and due:
+            report.meesho_saved = store.save_snapshots(report.run_id, due)
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        report.warnings.append(f"Meesho prices not stored ({exc}) — run supabase/migration-meesho.sql")
 
 
 def keywords_due(
@@ -562,9 +600,15 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     settings = load_settings()
-    products = load_products()
+    # The Google Sheet, fresh — so an edit there reaches the next hourly run with nobody
+    # uploading anything. Falls back to the last good copy when Google cannot be reached.
+    products, changed, problem = refresh_catalogue()
     started = time.monotonic()
 
+    if problem:
+        print(f"  ! {problem}")
+    elif changed:
+        print("  pricing sheet changed on Google — using the new version")
     print(f"{len(products)} products, {sum(len(p.urls) for p in products)} listings")
     if not settings.can_store and not args.dry_run:
         print("  ! Supabase not configured — running dry")
@@ -589,6 +633,10 @@ def main(argv: list[str] | None = None) -> int:
         counts = summarise(results).get(marketplace, {})
         detail = "  ".join(f"{k}={v}" for k, v in sorted(counts.items()))
         print(f"  {marketplace:<9} {detail}")
+    print(
+        f"  {'meesho':<9} {report.meesho_matched} on the Meesho sheet, "
+        f"{report.meesho_saved} changed and saved"
+    )
     print(f"\n{elapsed / 60:.1f} min")
 
     if args.fixture:

@@ -1,4 +1,8 @@
-"""Reads `Docs/pricing link.xlsx` into normalised Products.
+"""Reads the pricing workbook into normalised Products.
+
+The workbook comes from the "pricing link" Google Sheet, downloaded at the start of every run
+(see fetch_google_sheet); `Docs/pricing link.xlsx` is only the copy built into the app, used
+until the first download succeeds.
 
 The workbook is hand-maintained, so this file is mostly about absorbing its inconsistencies
 without letting any of them become a wrong number downstream. Every quirk handled here was
@@ -62,6 +66,8 @@ def workbook_status() -> tuple[Path, bool, str]:
     path = active_workbook()
     if path != USER_WORKBOOK:
         return path, False, "shipped with this app"
+    if fetched := last_fetched():
+        return path, True, "Google Sheet, fetched " + fetched.strftime("%d %b %Y %H:%M")
     try:
         stamp = "uploaded " + datetime.fromtimestamp(path.stat().st_mtime).strftime("%d %b %Y %H:%M")
     except OSError:
@@ -87,6 +93,9 @@ def install_workbook(source: Path) -> list[Product]:
     staging = USER_WORKBOOK.with_suffix(".incoming")
     shutil.copyfile(source, staging)
     staging.replace(USER_WORKBOOK)
+    # Whoever installed it last owns the date: a manual upload clears the "fetched" mark, and
+    # fetch_google_sheet rewrites it straight after calling this.
+    _source_mark().unlink(missing_ok=True)
     return products
 
 
@@ -95,7 +104,128 @@ def revert_workbook() -> bool:
     if not USER_WORKBOOK.exists():
         return False
     USER_WORKBOOK.unlink()
+    _source_mark().unlink(missing_ok=True)
     return True
+
+
+# ── the Google Sheet ────────────────────────────────────────────────────────────────────────
+# The catalogue's real home is the "pricing link" Google Sheet, which the team edits directly.
+# Every run downloads it, validates it, and installs it as USER_WORKBOOK — so nobody has to
+# upload a file when a product, link or price target changes. The downloaded copy is also the
+# offline fallback: if Google cannot be reached, the run carries on with the last good sheet.
+
+#: "pricing link - with keywords and competitors". Must stay shared as "anyone with the link can
+#: view" — the download is unauthenticated. Overridable to point a test build at a copy.
+GOOGLE_SHEET_ID = os.environ.get(
+    "CATALOGUE_SHEET_ID", "1aPvqZxfgy4_qi8Oj7Q8VASlPZlKIZRQF48fb8F1n8cE"
+)
+GOOGLE_EXPORT = "https://docs.google.com/spreadsheets/d/{id}/export?format=xlsx"
+GOOGLE_EDIT = "https://docs.google.com/spreadsheets/d/{id}/edit"
+
+
+def _source_mark() -> Path:
+    """Beside USER_WORKBOOK: when it was last fetched from Google. Absent for an upload."""
+    return USER_WORKBOOK.with_name("pricing link.fetched")
+
+
+def _problem_file() -> Path:
+    """Beside USER_WORKBOOK: why the last fetch failed. Removed by the next one that works.
+
+    A file rather than memory so a failure in the scheduled (windowless) run still reaches the
+    window the next time someone opens it — that is where they are asked to upload instead."""
+    return USER_WORKBOOK.with_name("pricing link.fetch-error")
+
+
+def fetch_problem() -> str | None:
+    try:
+        return _problem_file().read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def last_fetched() -> datetime | None:
+    try:
+        return datetime.fromisoformat(_source_mark().read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def fetch_google_sheet(sheet_id: str | None = None) -> tuple[list[Product], bool]:
+    """Download the Google Sheet and install it. (products, whether it differed from before).
+
+    Goes through install_workbook, so a sheet that does not parse — someone mid-edit deleted
+    the header row — is refused and the previous copy stays in force. Raises on any failure,
+    after recording it for fetch_problem().
+    """
+    try:
+        result = _fetch_google_sheet(sheet_id)
+    except Exception as exc:
+        try:
+            USER_WORKBOOK.parent.mkdir(parents=True, exist_ok=True)
+            _problem_file().write_text(str(exc), encoding="utf-8")
+        except OSError:
+            pass
+        raise
+    _problem_file().unlink(missing_ok=True)
+    return result
+
+
+def _fetch_google_sheet(sheet_id: str | None) -> tuple[list[Product], bool]:
+    import tempfile
+
+    import httpx
+
+    from .tls import SSL_CONTEXT
+
+    response = httpx.get(
+        GOOGLE_EXPORT.format(id=sheet_id or GOOGLE_SHEET_ID),
+        follow_redirects=True,
+        timeout=60.0,
+        verify=SSL_CONTEXT,
+    )
+    if response.status_code != 200 or not response.content.startswith(b"PK"):
+        # An unshared sheet answers 200 with Google's sign-in page, not an error code.
+        raise RuntimeError(
+            f"could not download the pricing Google Sheet [{response.status_code}] — "
+            'is it shared as "anyone with the link can view"?'
+        )
+
+    USER_WORKBOOK.parent.mkdir(parents=True, exist_ok=True)
+    # A unique name: the window and the scheduled task can both be fetching at the same moment.
+    fd, name = tempfile.mkstemp(suffix=".xlsx", dir=USER_WORKBOOK.parent)
+    download = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(response.content)
+        products = load_products(download)
+        # Compared as parsed products, not bytes: Google builds a fresh file on every download,
+        # so the bytes differ even when not a single cell did.
+        try:
+            changed = load_products(USER_WORKBOOK) != products
+        except Exception:  # noqa: BLE001 — no copy yet, or an unreadable one
+            changed = True
+        if changed:
+            products = install_workbook(download)
+    finally:
+        download.unlink(missing_ok=True)
+    if not products:
+        raise ValueError("the pricing Google Sheet contains no products")
+    _source_mark().write_text(datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    return products, changed
+
+
+def refresh_catalogue() -> tuple[list[Product], bool, str | None]:
+    """The catalogue for a run: fresh from Google when possible, else the last good copy.
+
+    (products, whether the sheet changed, a warning when Google could not be used). Raises only
+    when there is no usable sheet at all.
+    """
+    try:
+        products, changed = fetch_google_sheet()
+        return products, changed, None
+    except Exception as exc:  # noqa: BLE001 — offline, unshared, or a half-edited sheet
+        _, _, stamp = workbook_status()
+        return load_products(), False, f"Google Sheet not fetched ({exc}) — using the {stamp} copy"
 
 
 def summarise_catalogue(products: list[Product]) -> str:

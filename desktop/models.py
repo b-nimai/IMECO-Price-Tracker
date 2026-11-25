@@ -45,10 +45,14 @@ class Via(str, Enum):
     DIRECT = "direct"
     NONE = "none"
     """No request was made at all — the SKU has no link for this marketplace."""
+    SHEET = "sheet"
+    """Copied from a spreadsheet someone keeps, not fetched — Meesho's prices (see meesho.py)."""
 
 
-# Mirrors src/data/types.ts — the two must stay in step. Every value must also be allowed by the
-# marketplace CHECK constraint on price_snapshots (supabase/schema.sql), or the save fails.
+# The marketplaces this app SCRAPES. Mirrors the dashboard's types.ts, which also lists
+# "meesho": that one is read from a Google Sheet by meesho.py, never fetched, so it is not here.
+# Every value must also be allowed by the marketplace CHECK constraint on price_snapshots
+# (supabase/schema.sql), or the save fails.
 MARKETPLACES = ("amazon", "flipkart", "blinkit", "myntra")
 
 #: The sheet has competitor links for the other marketplaces, but not this one.
