@@ -255,8 +255,11 @@ HEADERS: dict[str, tuple[str, str]] = {
     "blinkit link": ("blinkit", "link"),
     "myntra sp": ("myntra", "sp"),
     "myntra link": ("myntra", "link"),
-    # "Meesho Link" is deliberately NOT mapped: Meesho refuses automated requests (see README),
-    # and an unmapped header is simply ignored, so its links are never counted as listings to fetch.
+    # Read like the others so the dashboard can open the listing, but NEVER fetched: Meesho
+    # refuses automated requests (see README), and the scraper only walks MARKETPLACES, which
+    # does not include it. Its prices come from the Meesho sheet (meesho.py), and this link is
+    # also how a product is found there when its Meesho STYLE ID differs from our SKU.
+    "meesho link": ("meesho", "link"),
 }
 
 

@@ -226,7 +226,8 @@ def attribute(results: list[SearchResult], products: list[Product]) -> None:
     by_listing: dict[tuple[str, str], Product] = {}
     for p in products:
         for marketplace, url in p.urls.items():
-            m = LISTING_ID[marketplace].search(url)
+            pattern = LISTING_ID.get(marketplace)  # none for Meesho, which is never searched
+            m = pattern.search(url) if pattern else None
             if m:
                 by_listing[(marketplace, m.group(1))] = p
 

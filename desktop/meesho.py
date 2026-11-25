@@ -157,13 +157,33 @@ def fetch_listings(sheet_id: str = SHEET_ID) -> dict[str, Listing]:
     return read_workbook(response.content)
 
 
+def _product_id(url: str | None) -> int | None:
+    """The Meesho product id in a listing link — ".../p/c4ym2e" is 733927478."""
+    m = re.search(r"/p/([0-9a-z]+)(?:[/?#]|$)", url or "", re.IGNORECASE)
+    try:
+        return int(m.group(1).lower(), 36) if m else None
+    except ValueError:
+        return None
+
+
+def listing_for(product: Product, listings: dict[str, Listing]) -> Listing | None:
+    """This product's row on the Meesho sheet: by SKU = STYLE ID, or else through the "Meesho
+    Link" on our sheet, for a product Meesho knows by another code (IMECTCP2 is DMWC4KKP)."""
+    if product.competitor_of:
+        return None
+    listing = listings.get(_key(product.sku))
+    if listing is None and (pid := _product_id(product.url_for(MARKETPLACE))):
+        listing = next((x for x in listings.values() if x.product_id == pid), None)
+    return listing
+
+
 def urls_for(products: list[Product], listings: dict[str, Listing]) -> dict[str, dict[str, str]]:
-    """{sku: {"meesho": link}} for our products on the sheet, merged into `products.urls` when
-    the catalogue is synced. Never added to Product.urls itself: that dict is what the scraper
-    and the keyword search walk, and neither knows Meesho."""
+    """{sku: {"meesho": link}} for products on the Meesho sheet, merged into `products.urls`
+    when the catalogue is synced. A link typed in our sheet's "Meesho Link" column wins over
+    this one (see Store.sync_products), so this only fills the products that have none."""
     out: dict[str, dict[str, str]] = {}
     for product in products:
-        listing = None if product.competitor_of else listings.get(_key(product.sku))
+        listing = listing_for(product, listings)
         if listing and listing.url:
             out[product.sku] = {MARKETPLACE: listing.url}
     return out
@@ -182,17 +202,19 @@ def cells_for(
 ) -> list[tuple[str, Cell]]:
     """A Meesho cell for every one of OUR products the sheet lists.
 
-    Competitors are skipped: the export covers IMECO's own Meesho catalogue only. A product that
-    was on Meesho last time and is missing now gets one `not_listed` cell, so the dashboard
-    stops showing a price the sheet no longer gives.
+    Competitors are skipped: the export covers IMECO's own Meesho catalogue only. A product the
+    sheet does not list gets a `not_listed` cell when it was on Meesho last time (so the
+    dashboard stops showing a price the sheet no longer gives) or when our sheet has a Meesho
+    link for it (so its cell says why there is no price instead of "awaiting check" forever).
+    `changed` then saves that once, not every run.
     """
     cells: list[tuple[str, Cell]] = []
     for product in products:
         if product.competitor_of:
             continue
-        listing = listings.get(_key(product.sku))
+        listing = listing_for(product, listings)
         if listing is None:
-            if product.sku in previously_listed:
+            if product.sku in previously_listed or product.url_for(MARKETPLACE):
                 cells.append(
                     (product.sku, Cell(MARKETPLACE, Status.NOT_LISTED, via=Via.SHEET, note=NOT_IN_SHEET))
                 )
@@ -239,11 +261,12 @@ def _main() -> int:
     listings = fetch_listings()
     cells = cells_for(products, listings, set())
     own = [p for p in products if not p.competitor_of]
-    print(f"{len(listings)} Meesho listings, {len(cells)} of our {len(own)} products matched\n")
-    for sku, cell in cells:
-        url = listings[_key(sku)].url or ""
+    priced = [(s, c) for s, c in cells if c.price is not None]
+    print(f"{len(listings)} Meesho listings, {len(priced)} of our {len(own)} products matched\n")
+    for sku, cell in priced:
+        url = next(p for p in products if p.sku == sku).url_for(MARKETPLACE) or ""
         print(f"  {sku:<22} {cell.status.value:<13} ₹{cell.price:<5g} {url}  {cell.note or ''}")
-    missing = [p.sku for p in own if _key(p.sku) not in listings]
+    missing = [p.sku for p in own if listing_for(p, listings) is None]
     print(f"\nnot on the Meesho sheet ({len(missing)}): {', '.join(missing)}")
     return 0
 

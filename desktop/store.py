@@ -96,7 +96,8 @@ class Store:
                 "starred": p.starred,
                 "position": p.position,
                 "target_sp": p.target_sp,
-                "urls": {**p.urls, **(extra_urls or {}).get(p.sku, {})},
+                # The sheet's own link wins over a derived one.
+                "urls": {**(extra_urls or {}).get(p.sku, {}), **p.urls},
                 "brand": p.brand,
                 "competitor_of": p.competitor_of,
                 "tsp": p.tsp,
